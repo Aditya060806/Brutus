@@ -413,6 +413,29 @@ Brutus has a **physical humanoid face** that brings the AI to life. The robot he
 
 **💰 Estimated Build Cost: ~$15–25 USD** (Arduino clone + 4× SG90 + HM-10 + LED + misc)
 
+### 🖥️ PCB Design & 3D Model
+
+<div align="center">
+
+<table>
+<tr>
+<td align="center" width="100%">
+<img src="assets/PCB Design.png" width="680" alt="Brutus robot — custom PCB design"/>
+<br/><sub><b>Custom PCB layout — Arduino + HM-10 BLE + servo headers + power rails</b></sub>
+</td>
+</tr>
+</table>
+
+<br/>
+
+> **🧊 3D Model** — The full Brutus head assembly is available as a `.glb` file you can inspect interactively on GitHub:
+>
+> **[→ View Brutus-1.glb in 3D on GitHub](assets/Brutus-1.glb)**
+>
+> *(GitHub renders `.glb` files with a built-in 3D viewer — pan, rotate, and zoom the full head assembly directly in the browser)*
+
+</div>
+
 ### 🔌 Wiring Diagram
 
 ```
