@@ -9,13 +9,21 @@
 [![Electron](https://img.shields.io/badge/Electron-41.x-47848F?style=for-the-badge&logo=electron&logoColor=white)](https://www.electronjs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
 [![Arduino](https://img.shields.io/badge/Arduino-UNO-00979D?style=for-the-badge&logo=arduino&logoColor=white)](https://www.arduino.cc)
-[![Gemini](https://img.shields.io/badge/Powered%20by-Gemini%20AI-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
+[![Groq](https://img.shields.io/badge/Powered%20by-Groq%20%2B%20LLaMA-F55036?style=for-the-badge&logo=meta&logoColor=white)](https://groq.com)
 [![Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 ---
 
 **Voice conversations** · **Live lip-sync** · **Robot animations** · **OS automation** · **Web search** · **Email** · **Vision** · **Screen share** · **Deep research** · **File control** · **ADB mobile link** · **and more**
+
+---
+
+### 📱 Also on Android?
+
+> Brutus has a **companion mobile app** — a full-featured Android AI assistant with its own robot BLE control, Gemini Live voice, and 25+ tools.
+>
+> **[→ Check out Brutus Mobile (Android)](https://github.com/Aditya060806/Brutus-app)**
 
 </div>
 
@@ -80,11 +88,13 @@
 
 Brutus is two things in one:
 
-1. **🖥️ A Windows Desktop AI Agent** — Built with Electron + React, powered by Google Gemini AI. Real-time voice conversations, OS automation, vision, screen control, emails, deep research, and 40+ tools — all through natural speech or text.
+1. **🖥️ A Windows Desktop AI Agent** — Built with Electron + React, powered by open-source LLMs via Groq (LLaMA 3) and local inference via Xenova Transformers. Real-time voice conversations using a fully open-source STT → LLM → TTS pipeline, OS automation, vision, screen control, emails, deep research, and 40+ tools — all through natural speech or text.
 
-2. **🤖 A Physical Robot Head** — An Arduino-powered humanoid face with 4 servos (eyes X/Y, eyelid, mouth), an LED, and a sound sensor. The desktop app drives the robot's expressions, lip-syncs its mouth to Gemini's voice output, and triggers named animation sequences — all over Bluetooth Low Energy.
+2. **🤖 A Physical Robot Head** — An Arduino-powered humanoid face with 4 servos (eyes X/Y, eyelid, mouth), an LED, and a sound sensor. The desktop app drives the robot's expressions, lip-syncs its mouth to the TTS voice output, and triggers named animation sequences — all over Bluetooth Low Energy.
 
 When Brutus talks to you, his robot face **moves its mouth in sync**, changes expressions based on the **emotion in its speech**, and nods, winks, or laughs on command.
+
+> Looking for the **Android / mobile version**? → [**Brutus Mobile App**](https://github.com/Aditya060806/Brutus-app)
 
 ---
 
@@ -100,11 +110,13 @@ When Brutus talks to you, his robot face **moves its mouth in sync**, changes ex
 | 🔩 **Servos** | 4 × SG90 (eyes X/Y, eyelid, mouth) |
 | 📡 **BLE Commands** | 11 command types |
 | 📦 **NPM Dependencies** | 50+ packages |
-| 🧠 **AI Providers** | 4 (Gemini, Groq, Tavily, HuggingFace) |
+| 🧠 **AI Providers** | Groq (LLaMA 3), HuggingFace, Tavily, local Xenova |
+| 🎙️ **Voice Stack** | Whisper STT + Meta MMS / Kokoro TTS (open-source) |
 | 🗂️ **Lines of Code (approx.)** | 15,000+ |
 | 🏗️ **Architecture** | Electron (main) + React 19 (renderer) + IPC bridge |
 | 💾 **Vector DB** | LanceDB (embedded, local-first) |
 | 📱 **Mobile Link** | ADB over Wi-Fi (Android deep control) |
+| 📱 **Mobile Companion** | [Brutus Android App](https://github.com/Aditya060806/Brutus-app) |
 
 </div>
 
@@ -116,26 +128,25 @@ When Brutus talks to you, his robot face **moves its mouth in sync**, changes ex
 You speak a command
         │
         ▼
-┌──────────────┐
-│  Electron    │  ──── React UI (renderer process)
-│  Main Process│  ──── IPC Bridge (preload)
-└──────┬───────┘
-        │
-        ▼
+┌──────────────────────────┐
+│  Whisper STT (local/API) │  ──── speech → text transcription
+└──────────┬───────────────┘
+           │
+           ▼
 ┌──────────────────┐      ┌───────────────────┐
-│  Gemini AI       │ ◄──► │  Vision / Screen  │
-│  (text + vision) │      │  (screenshots)    │
+│  LLaMA 3 / Groq  │ ◄──► │  Vision / Screen  │
+│  (reasoning LLM) │      │  (screenshots)    │
 └──────┬───────────┘      └───────────────────┘
         │
 ┌───────┴──────────────────────┐
 │                              │
 ▼                              ▼
-┌──────────┐          ┌─────────────────────┐
-│  Voice   │          │  Tool Calls (40+)   │
-│  output  │          │  (OS, web, files,   │
-└────┬─────┘          │   ADB, email, etc.) │
-     │                └─────────────────────┘
-     ▼
+┌──────────────────────┐   ┌──────────────────────┐
+│  Meta MMS / Kokoro   │   │  Tool Calls (40+)    │
+│  TTS (voice output)  │   │  (OS, web, files,    │
+└──────────┬───────────┘   │   ADB, email, etc.)  │
+           │               └──────────────────────┘
+           ▼
 ┌────────────────────────┐
 │  Robot (BLE via HM-10) │
 │  lip-sync + emotion    │
@@ -145,25 +156,89 @@ You speak a command
 
 ---
 
+## 🎙️ Open-Source Voice Stack
+
+Brutus is designed to run a **fully open-source, self-hosted voice pipeline** — no proprietary voice APIs required. The architecture is modular, so each component can be swapped or fine-tuned independently.
+
+### 🔊 Text-to-Speech (TTS) — Brutus's Voice
+
+| Model | Source | Why It Fits |
+|---|---|---|
+| **Meta MMS-TTS** (VITS) | [facebook/mms-tts](https://huggingface.co/facebook/mms-tts) | Facebook's Massively Multilingual Speech — VITS-based, 1100+ languages, fine-tuneable via HuggingFace Trainer |
+| **Kokoro-82M** | [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | 82M-param open-weight TTS, Apache 2.0, near-commercial quality, runs on CPU |
+| **StyleTTS 2** | [yl4579/StyleTTS2](https://github.com/yl4579/StyleTTS2) | Human-level TTS via style diffusion — zero-shot speaker cloning, emotion control |
+| **Coqui XTTS-v2** | [coqui-ai/TTS](https://github.com/coqui-ai/TTS) | Voice cloning from 6s reference clip, 17 languages, actively maintained forks |
+| **Piper TTS** | [rhasspy/piper](https://github.com/rhasspy/piper) | Ultra-fast local neural TTS, runs offline on low-end hardware, great for real-time lip-sync |
+
+### 🎤 Speech-to-Text (STT) — Brutus Listens
+
+| Model | Source | Why It Fits |
+|---|---|---|
+| **OpenAI Whisper** | [openai/whisper](https://github.com/openai/whisper) | MIT-licensed, multilingual, runs fully local — `whisper-base` to `whisper-large-v3` |
+| **Whisper.cpp** | [ggerganov/whisper.cpp](https://github.com/ggerganov/whisper.cpp) | C++ port of Whisper — extremely fast on CPU, ideal for real-time desktop use |
+| **Meta MMS-ASR** | [facebook/mms-1b-fl102](https://huggingface.co/facebook/mms-1b-fl102) | Wav2Vec2-based ASR for 100+ languages, fine-tuneable with adapter modules |
+| **WhisperSpeech** | [WhisperSpeech/WhisperSpeech](https://github.com/WhisperSpeech/WhisperSpeech) | Inverted Whisper — both STT and TTS from the same architecture |
+
+### 🔧 Fine-Tuning Brutus's Voice
+
+The voice pipeline is built to be personalized. To train a custom **"Brutus voice"**:
+
+```bash
+# 1. Fine-tune Meta MMS-TTS on your voice dataset using HuggingFace
+git clone https://github.com/ylacombe/finetune-hf-vits
+pip install -r requirements.txt
+
+# 2. Prepare your audio dataset (10–30 min of clean speech recommended)
+# Dataset format: audio files + transcript CSV
+
+# 3. Launch training
+python train.py \
+  --model_name_or_path "facebook/mms-tts-eng" \
+  --dataset_path "./your_voice_dataset" \
+  --output_dir "./brutus-voice-model"
+
+# 4. Load the fine-tuned model in Brutus via HuggingFace Inference
+```
+
+> The `@xenova/transformers` package already bundled in Brutus can load fine-tuned Whisper and MMS models directly in Node.js — no Python runtime needed at runtime.
+
+### 🔄 Auto-Drive Voice Mode
+
+When the LLM produces a response, Brutus automatically:
+
+| AI Status | Voice Action | Robot Behavior |
+|---|---|---|
+| 🎧 Listening | Whisper STT active, VAD gating | Eyes center, LED solid |
+| 🤔 Thinking | LLM inferencing via Groq | Eyes drift up-left, LED pulse |
+| 🗣️ Speaking | MMS/Kokoro TTS → audio chunks → lip-sync | Mouth angle from audio amplitude |
+| ⏸️ Idle | Voice pipeline paused | Eyes center, LED pulse |
+| ❌ Error | TTS error tone | Sad expression, LED fast blink |
+
+---
+
 ## ✨ App Features
 
 ### 🎙️ Voice & Conversation
 
 | Feature | Description |
 |---|---|
-| **Real-time voice** | Gemini AI with continuous mic streaming and live responses |
+| **Real-time voice** | Open-source STT → LLaMA 3 reasoning → open-source TTS pipeline |
+| **Local inference** | Xenova Transformers runs Whisper and small models in-process |
+| **Groq fast inference** | LLaMA 3 / Mixtral via Groq for ultra-low latency responses |
 | **Text fallback** | Full text chat interface when voice isn't practical |
 | **Live transcripts** | See what you and Brutus are saying in real time |
 | **Chat history** | Persisted locally via `electron-store` |
 | **Context awareness** | Maintains conversation context across sessions |
+| **Barge-in** | Interrupt Brutus mid-sentence and the TTS stops immediately |
 
 ### 👁️ Vision & Screen
 
 | Feature | Description |
 |---|---|
-| **Screenshot vision** | Brutus captures your screen and understands what it sees via Gemini multimodal |
+| **Screenshot vision** | Brutus captures your screen and understands what it sees via multimodal AI |
 | **Screen Peeler (OCR)** | Instantly extract text from any visible UI element using Tesseract.js |
 | **Ghost Coder** | Inline IDE generation triggered by `Ctrl+Alt+Space` |
+| **Gallery analysis** | Point at any local image — Brutus describes and reasons about it |
 
 ### 🛠️ Tools & Integrations (40+)
 
@@ -188,13 +263,14 @@ You speak a command
 
 | 🌐 **Web & Research** |
 |---|
-| Google search (Tavily) |
+| Web search (Tavily) |
 | Deep multi-source research |
 | Weather (real-time) |
 | Stock prices + compare |
 | Build animated websites |
 | DOM hacking (Puppeteer) |
 | Expose localhost (Wormhole) |
+| Notion database sync |
 
 </td>
 <td>
@@ -206,6 +282,7 @@ You speak a command
 | Schedule WhatsApp |
 | Draft + send emails |
 | Notification reader (ADB) |
+| Contact lookup |
 
 </td>
 <td>
@@ -267,6 +344,7 @@ You speak a command
 | Biometric face recognition |
 | Local key encryption |
 | BYOK (bring your own keys) |
+| Zero telemetry |
 
 </td>
 </tr>
@@ -294,6 +372,8 @@ You speak a command
 | Physical robot face w/ lip-sync | ✅ | ❌ | ❌ | ❌ |
 | Emotion-driven servo expressions | ✅ | ❌ | ❌ | ❌ |
 | 20 named animation macros | ✅ | ❌ | ❌ | ❌ |
+| Fully open-source voice pipeline | ✅ | ❌ | ❌ | ❌ |
+| Fine-tuneable custom voice | ✅ | ❌ | ❌ | ❌ |
 | Real OS file & app control | ✅ | ❌ | ⚠️ Limited | ❌ |
 | Ghost typing / tap automation | ✅ | ❌ | ❌ | ❌ |
 | ADB mobile deep link | ✅ | ❌ | ❌ | ❌ |
@@ -305,6 +385,7 @@ You speak a command
 | Biometric face-lock vault | ✅ | ❌ | ❌ | ❌ |
 | Fully open-source & self-hostable | ✅ | ❌ | ❌ | ❌ |
 | Bring-your-own API keys | ✅ | ❌ | ❌ | ❌ |
+| Android companion app | ✅ | ❌ | ❌ | ❌ |
 
 > ⚠️ = partial / requires additional setup
 
@@ -385,7 +466,7 @@ The desktop app communicates with the robot over BLE GATT serial (UUID `0000FFE1
 | 4 | 😴 Sleepy | Nearly closed eyes, relaxed |
 | 5 | 😲 Surprised | Max wide eyes + mouth open |
 
-Each expression can be dialed from **0% (neutral)** to **100% (full)** using the intensity parameter.
+Each expression can be dialed from **0% (neutral)** to **100% (full)** using the intensity parameter. The formula: `servo_target = 90 + (preset - 90) × intensity / 100`.
 
 ### 🎭 Animation Macros (A command)
 
@@ -419,23 +500,9 @@ Each expression can be dialed from **0% (neutral)** to **100% (full)** using the
 | W8 | 🤩 Happy Bounce | Excited bouncing motion |
 | W9 | 🤔 Confused | Uncertain tilting and looking around |
 
-### 🔄 Auto-Drive Mode
-
-When connected and auto-drive is on, the robot **automatically reacts** to Gemini's response state:
-
-| AI Status | Expression | LED Pattern | Robot Behavior |
-|---|---|---|---|
-| 🎧 Listening | Happy | Solid | Eyes center, attentive |
-| 🤔 Thinking | Thinking | Pulse | Eyes drift up-left |
-| 🗣️ Speaking | *per emotion* | Solid | **Lip-sync mouth to audio output** |
-| ⏸️ Idle | Thinking | Pulse | Eyes center, mouth closed |
-| ❌ Error | Sad | Fast blink | Blink, mouth closed |
-
-During speech, Brutus detects **emotion cues** from Gemini's output (happy, angry, sad, surprised, etc.) and automatically switches the robot's expression and LED pattern to match.
-
 ### 🗣️ Voice-Triggered Animations
 
-Gemini can trigger robot animations through natural speech:
+The LLM can trigger robot animations through natural speech via tool calls:
 
 > *"Brutus, nod your head"* → plays Nod animation  
 > *"Wink at them"* → plays Wink animation  
@@ -489,9 +556,11 @@ brutus-ai/
 | **State** | Zustand |
 | **Animations** | Framer Motion + GSAP 3 |
 | **3D visuals** | Three.js + React Three Fiber |
-| **AI / LLM** | Google Gemini AI (`@google/genai`) |
-| **Fast inference** | Groq SDK |
-| **Local models** | `@xenova/transformers` + `@huggingface/inference` |
+| **LLM reasoning** | Groq SDK (LLaMA 3 / Mixtral) |
+| **Local inference** | `@xenova/transformers` (Whisper, small LMs) |
+| **TTS (voice out)** | Meta MMS-TTS / Kokoro-82M / StyleTTS2 via `@huggingface/inference` |
+| **STT (voice in)** | OpenAI Whisper via `@xenova/transformers` or whisper.cpp |
+| **Image generation** | `@huggingface/inference` (SDXL / Stable Diffusion) |
 | **Vector DB** | LanceDB (embedded, local-first) |
 | **Web automation** | Puppeteer + puppeteer-extra-stealth |
 | **OS automation** | Nut.js (mouse, keyboard, coordinates) |
@@ -563,7 +632,7 @@ Brutus will remember and auto-reconnect on next launch.
 
 - **Node.js 18+**
 - **Windows 10 / 11**
-- A **Gemini API key** from [Google AI Studio](https://aistudio.google.com)
+- A **Groq API key** (free) from [Groq Console](https://console.groq.com) for LLaMA 3
 - *(For robot)* Arduino IDE + hardware listed above
 
 ### 1. Clone the repo
@@ -590,17 +659,16 @@ cp .env.example .env
 Minimum required in `.env`:
 
 ```env
-VITE_BRUTUS_AI_API_KEY="your_gemini_api_key"
-VITE_GEMINI_API_KEY="your_gemini_api_key"
-MAIN_VITE_GROQ_API_KEY="your_groq_api_key"
+MAIN_VITE_GROQ_API_KEY="your_groq_api_key"    # LLaMA 3 reasoning
+VITE_BRUTUS_AI_API_KEY="your_gemini_api_key"  # optional fallback
 ```
 
 Full setup (unlocks all features):
 
 ```env
-VITE_IMAGE_AI_API_KEY="your_huggingface_api_key"
-VITE_TAVILY_API_KEY="your_tavily_api_key"
-VITE_NOTION_API_KEY="your_notion_key"
+VITE_IMAGE_AI_API_KEY="your_huggingface_api_key"   # image gen + MMS/Kokoro TTS
+VITE_TAVILY_API_KEY="your_tavily_api_key"           # web search + research
+VITE_NOTION_API_KEY="your_notion_key"               # Notion sync
 VITE_NOTION_DATABASE_ID="your_notion_database_id"
 ```
 
@@ -645,10 +713,10 @@ npm run build:win
 
 | Key | Required | Purpose | Get it |
 |---|---|---|---|
-| `VITE_GEMINI_API_KEY` | ✅ | Core AI reasoning & generation | [Google AI Studio](https://aistudio.google.com/app/apikey) |
-| `MAIN_VITE_GROQ_API_KEY` | ✅ | Ultra-fast inference routing | [Groq Console](https://console.groq.com/keys) |
+| `MAIN_VITE_GROQ_API_KEY` | ✅ | LLaMA 3 / Mixtral reasoning (fast, free tier) | [Groq Console](https://console.groq.com/keys) |
+| `VITE_IMAGE_AI_API_KEY` | ✅ | HuggingFace — MMS TTS + image gen | [HuggingFace Tokens](https://huggingface.co/settings/tokens) |
 | `VITE_TAVILY_API_KEY` | 🟡 | Deep web research | [Tavily Portal](https://app.tavily.com/home) |
-| `VITE_IMAGE_AI_API_KEY` | 🟡 | AI image generation | [HuggingFace Tokens](https://huggingface.co/settings/tokens) |
+| `VITE_BRUTUS_AI_API_KEY` | 🟡 | Gemini AI fallback (optional) | [Google AI Studio](https://aistudio.google.com/app/apikey) |
 | `VITE_NOTION_API_KEY` | 🟡 | Notion database sync | [Notion Integrations](https://www.notion.so/my-integrations) |
 | Google OAuth | 🟡 | Gmail read/compose | [Google Cloud Console](https://console.cloud.google.com) |
 
@@ -659,23 +727,27 @@ npm run build:win
 | Component | Minimum | Recommended |
 |---|---|---|
 | **OS** | Windows 10 | Windows 11 |
-| **RAM** | 4 GB | 8 GB (for heavy RAG indexing) |
-| **Storage** | 3.5 GB | 5 GB+ (for vector DB growth) |
+| **RAM** | 4 GB | 8 GB (for heavy RAG indexing + local TTS) |
+| **Storage** | 3.5 GB | 5 GB+ (for vector DB + TTS model weights) |
 | **Node.js** | 18.x | 20.x LTS |
+| **GPU** | Not required | CUDA GPU speeds up local Whisper + StyleTTS2 |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] 🎤 Custom wake word ("Hey Brutus")
+- [ ] 🎤 Custom wake word ("Hey Brutus") via Porcupine or openWakeWord
+- [ ] 🦜 Fine-tuned Brutus voice model (Meta MMS-TTS trained on custom dataset)
+- [ ] 🔊 StyleTTS2 integration for emotion-expressive voice output
+- [ ] 🧠 Fully offline mode — local Whisper + local LLM (Ollama / llama.cpp)
 - [ ] 🍎 macOS + Linux support
-- [ ] 🧠 Offline fallback model (on-device via Xenova)
 - [ ] 🔌 Plugin marketplace for community tools
 - [ ] 🕸️ Memory graph visualization
 - [ ] 🤝 Multi-agent collaboration mode
 - [ ] 🌈 Neopixel RGB LED strip for true color emotions
 - [ ] 🦾 Neck pan/tilt servo for head tracking
 - [ ] ☁️ Desktop + Cloud hybrid sync
+- [ ] 📱 Deeper integration with [Brutus Android app](https://github.com/Aditya060806/Brutus-app)
 
 ---
 
@@ -683,8 +755,9 @@ npm run build:win
 
 - **100% BYOK** — Bring Your Own Keys. Your API keys never leave your machine.
 - **Local encryption** — Keys stored via OS keychain / `electron-store`.
-- **Zero-trust** — No external key storage, no telemetry.
+- **Zero-trust** — No external key storage, no telemetry, no phone-home.
 - **Face-lock vault** — Optional biometric face recognition via `face-api.js` to restrict access.
+- **Open-source voice** — No audio sent to proprietary voice APIs. STT and TTS run locally.
 
 ---
 
@@ -702,6 +775,15 @@ Contributions are welcome! Feel free to open issues or submit pull requests.
 8. Open a Pull Request with a clear description and screenshots if UI is changed
 
 Read the full [Contribution Guide](CONTRIBUTING.md) before submitting.
+
+---
+
+## 🌐 Brutus Ecosystem
+
+| Project | Platform | Description |
+|---|---|---|
+| **Brutus AI** (this repo) | 🖥️ Windows Desktop | Electron + React desktop agent with robot BLE control |
+| **[Brutus Mobile](https://github.com/Aditya060806/Brutus-app)** | 📱 Android | Flutter app with Gemini Live, robot BLE, and 25+ tools |
 
 ---
 
@@ -729,7 +811,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 <div align="center">
 
-**Built with ❤️ using Electron, React, Gemini, and Arduino**
+**Built with ❤️ using Electron, React, LLaMA, Meta MMS, and Arduino**
 
 *Brutus AI — Because your AI assistant deserves a face.*
 
