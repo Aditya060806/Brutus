@@ -29,13 +29,9 @@
 
 <table>
 <tr>
-<td align="center" width="50%">
-<img src="assets/20260527_045554.jpg" width="300" alt="Brutus robot build — early assembly"/>
-<br/><sub><b>Early assembly — servo layout & wiring</b></sub>
-</td>
-<td align="center" width="50%">
-<img src="assets/20260528_163145.jpg" width="300" alt="Brutus robot build — complete assembly"/>
-<br/><sub><b>Completed assembly — Arduino + HM-10 + servos</b></sub>
+<td align="center" width="100%">
+<img src="assets/WhatsApp Image 2026-06-11 at 04.16.02.jpeg" width="420" alt="Brutus robot — final build with glowing blue eyes"/>
+<br/><sub><b>Brutus — final build with glowing eyes & servo face</b></sub>
 </td>
 </tr>
 </table>
@@ -44,13 +40,17 @@
 
 <table>
 <tr>
-<td align="center" width="50%">
-<img src="assets/20260529_162029.jpg" width="300" alt="Brutus robot face — close up"/>
-<br/><sub><b>Face close-up — eye & mouth servos in action</b></sub>
+<td align="center" width="33%">
+<img src="assets/20260529_162029.jpg" width="240" alt="Brutus robot face — close up"/>
+<br/><sub><b>Face close-up — eye & mouth servos</b></sub>
 </td>
-<td align="center" width="50%">
-<img src="assets/WhatsApp Image 2026-06-11 at 04.16.02.jpeg" width="300" alt="Brutus robot — final build"/>
-<br/><sub><b>Final build — ready for demo</b></sub>
+<td align="center" width="33%">
+<img src="assets/20260527_045554.jpg" width="240" alt="Brutus robot build — early assembly"/>
+<br/><sub><b>Early assembly — servo layout & wiring</b></sub>
+</td>
+<td align="center" width="33%">
+<img src="assets/20260528_163145.jpg" width="240" alt="Brutus robot build — complete assembly"/>
+<br/><sub><b>Completed assembly — Arduino + HM-10 + servos</b></sub>
 </td>
 </tr>
 </table>
