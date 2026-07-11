@@ -16,11 +16,18 @@ import ResearchWidget from './Widgets/DeepResearch'
 import SemanticWidget from './Widgets/SematicSearch'
 import SmartDropZonesWidget from './Widgets/SmartZoneWidget'
 import TitleBar from './components/Titlebar'
+import QRWidget from './Widgets/QRWidget'
+import ChatPanel from './components/ChatPanel'
+import DramaticOverlay from './components/DramaticOverlay'
+import DeckStudioWidget from './Widgets/DeckStudioWidget'
+import KnowledgeGraphWidget from './Widgets/KnowledgeGraphWidget'
+import { RiChat3Line, RiMicLine, RiSlideshow3Line, RiNodeTree } from 'react-icons/ri'
 
 export type VisionMode = 'camera' | 'screen' | 'none'
 
 const IndexRoot = () => {
   const [isOverlay, setIsOverlay] = useState(false)
+  const [isChatOpen, setIsChatOpen] = useState(false)
 
   const [isSystemActive, setIsSystemActive] = useState(false)
   const [isMicMuted, setIsMicMuted] = useState(true)
@@ -37,6 +44,23 @@ const IndexRoot = () => {
     return () => {
       window.electron.ipcRenderer.removeAllListeners('overlay-mode')
     }
+  }, [])
+
+  // When a reminder/timer fires, have Brutus announce it (if connected).
+  useEffect(() => {
+    const handler = (_e: unknown, payload: any) => {
+      const text = payload?.text
+      const type = payload?.type || 'reminder'
+      if (text) {
+        window.dispatchEvent(
+          new CustomEvent('ai-force-speak', {
+            detail: `[SYSTEM]: A ${type} just triggered. Announce this to the user clearly and briefly: "${text}"`
+          })
+        )
+      }
+    }
+    window.electron.ipcRenderer.on('reminder-fired', handler)
+    return () => window.electron.ipcRenderer.removeAllListeners('reminder-fired')
   }, [])
 
   useEffect(() => {
@@ -212,6 +236,39 @@ const IndexRoot = () => {
       <TerminalOverlay />
       <LiveCodingWidget />
       <ResearchWidget />
+      <QRWidget />
+
+      {/* Voice / Text mode toggle */}
+      <button
+        onClick={() => setIsChatOpen((v) => !v)}
+        title={isChatOpen ? 'Switch to voice' : 'Switch to text chat'}
+        className="fixed bottom-6 right-6 z-[9065] h-12 w-12 flex items-center justify-center rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 shadow-[0_8px_30px_rgba(239,68,68,0.25)] backdrop-blur-md transition-all hover:scale-105"
+      >
+        {isChatOpen ? <RiMicLine size={20} /> : <RiChat3Line size={20} />}
+      </button>
+
+      {/* Deck Studio launcher */}
+      <button
+        onClick={() => window.dispatchEvent(new CustomEvent('open-deck-studio'))}
+        title="Open Deck Studio (AI presentation maker)"
+        className="fixed bottom-6 right-20 z-[9065] h-12 w-12 flex items-center justify-center rounded-full bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 shadow-[0_8px_30px_rgba(239,68,68,0.25)] backdrop-blur-md transition-all hover:scale-105"
+      >
+        <RiSlideshow3Line size={20} />
+      </button>
+
+      {/* Knowledge Graph launcher */}
+      <button
+        onClick={() => window.dispatchEvent(new CustomEvent('open-knowledge-graph'))}
+        title="Open Knowledge Graph (industrial operations brain)"
+        className="fixed bottom-6 right-[8.5rem] z-[9065] h-12 w-12 flex items-center justify-center rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 shadow-[0_8px_30px_rgba(6,182,212,0.25)] backdrop-blur-md transition-all hover:scale-105"
+      >
+        <RiNodeTree size={20} />
+      </button>
+
+      <ChatPanel open={isChatOpen} onClose={() => setIsChatOpen(false)} />
+      <DramaticOverlay />
+      <DeckStudioWidget />
+      <KnowledgeGraphWidget />
     </div>
   )
 }

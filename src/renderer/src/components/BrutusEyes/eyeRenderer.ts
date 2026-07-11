@@ -437,6 +437,8 @@ export function drawScanlines(ctx: CanvasRenderingContext2D, W: number, H: numbe
   // Use cached offscreen canvas for performance
   const iW = Math.round(W)
   const iH = Math.round(H)
+  // Guard: a 0-sized canvas (before layout settles) makes drawImage throw.
+  if (iW <= 0 || iH <= 0) return
   if (!scanlineCache || scanlineCacheW !== iW || scanlineCacheH !== iH) {
     scanlineCache = document.createElement('canvas')
     scanlineCache.width = iW

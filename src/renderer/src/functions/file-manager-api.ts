@@ -14,6 +14,14 @@ export const writeFile = async (fileName: string, content: string) => {
   }
 }
 
+export const appendFile = async (fileName: string, content: string) => {
+  try {
+    return await window.electron.ipcRenderer.invoke('append-file', { fileName, content })
+  } catch (err) {
+    return `Error: ${err}`
+  }
+}
+
 export const manageFile = async (
   operation: 'copy' | 'move' | 'delete',
   sourcePath: string,

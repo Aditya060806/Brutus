@@ -48,6 +48,24 @@ import registerScreenPeeler from './handlers/ScreenPeeler-handler'
 import registerPhantomKeyboard from './handlers/PhantomControl-handler'
 import registerSecurityVault from './security/Security'
 import registerLockSystem from './security/lock-system'
+import registerFileConverter from './logic/file-converter'
+import registerFileArchive from './logic/file-archive'
+import registerFolderAnalyzer from './logic/folder-analyzer'
+import registerPdfTools from './logic/pdf-tools'
+import registerMediaControls from './logic/media-controls'
+import registerTextChat from './services/text-chat'
+import registerArchitect from './services/architect'
+import registerExcelMaster from './logic/excel-master'
+import registerWebsiteStatus from './logic/website-status'
+import registerVscodeMaster from './logic/vscode-master'
+import registerGitMaster from './logic/git-master'
+import registerReminders from './logic/reminders'
+import registerFocusMode from './logic/focus-mode'
+import registerWallpaper from './logic/wallpaper'
+import registerPresentation from './services/presentation'
+import registerImageSearch from './logic/image-search'
+import registerDeckStudio from './services/deck-studio'
+import registerKnowledgeGraph from './services/knowledge-graph'
 import { autoUpdater } from 'electron-updater';
 
 app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
@@ -347,6 +365,24 @@ app.whenReady().then(() => {
 
   registerLockSystem()
   registerSecurityVault()
+  registerFileConverter(ipcMain)
+  registerFileArchive(ipcMain)
+  registerFolderAnalyzer(ipcMain)
+  registerPdfTools(ipcMain)
+  registerMediaControls(ipcMain)
+  registerTextChat({ ipcMain })
+  registerArchitect({ ipcMain })
+  registerExcelMaster(ipcMain)
+  registerWebsiteStatus(ipcMain)
+  registerVscodeMaster(ipcMain)
+  registerGitMaster(ipcMain)
+  registerReminders(ipcMain)
+  registerFocusMode(ipcMain)
+  registerWallpaper(ipcMain)
+  registerPresentation({ ipcMain })
+  registerImageSearch(ipcMain)
+  registerDeckStudio({ ipcMain })
+  registerKnowledgeGraph({ ipcMain })
   registerPhantomKeyboard()
   registerScreenPeeler()
   registerDropZoneControl(ipcMain)

@@ -11,7 +11,9 @@ import {
   RiCameraLine,
   RiComputerLine,
   RiCloseLine,
-  RiImageLine
+  RiImageLine,
+  RiSlideshow3Line,
+  RiNodeTree
 } from 'react-icons/ri'
 import { getSystemStatus } from '@renderer/services/system-info'
 import { getHistory } from '@renderer/services/brutus-ai-brain'
@@ -109,6 +111,24 @@ const Brutus = (props: BrutusProps) => {
               {tab.icon} {tab.id}
             </button>
           ))}
+
+          <div className="w-px self-stretch my-1 bg-white/10" />
+
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-deck-studio'))}
+            title="AI presentation maker"
+            className="cursor-pointer px-5 py-1.5 text-[10px] font-bold tracking-widest rounded-md transition-all duration-300 flex items-center gap-2 bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30 hover:text-red-200 hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
+          >
+            <RiSlideshow3Line className="text-sm" /> DECK STUDIO
+          </button>
+
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-knowledge-graph'))}
+            title="Industrial knowledge graph — ingest documents & ask"
+            className="cursor-pointer px-5 py-1.5 text-[10px] font-bold tracking-widest rounded-md transition-all duration-300 flex items-center gap-2 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/30 hover:text-cyan-200 hover:shadow-[0_0_15px_rgba(6,182,212,0.25)]"
+          >
+            <RiNodeTree className="text-sm" /> KNOWLEDGE GRAPH
+          </button>
         </div>
 
         <div className="flex items-center gap-6 text-[11px] font-mono font-bold opacity-60">

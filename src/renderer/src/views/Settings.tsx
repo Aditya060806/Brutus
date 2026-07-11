@@ -22,7 +22,12 @@ import {
   RiRefreshLine,
   RiDownloadCloud2Line,
   RiRocketLine,
-  RiDeleteBin6Line
+  RiDeleteBin6Line,
+  RiFileTransferLine,
+  RiCheckboxCircleLine,
+  RiErrorWarningLine,
+  RiFolderOpenLine,
+  RiCodeBoxLine
 } from 'react-icons/ri'
 
 interface SettingsProps {
@@ -53,6 +58,29 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
 
   const [appVersion, setAppVersion] = useState('...')
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'>('idle')
+  const [loStatus, setLoStatus] = useState<{ available: boolean; path: string | null }>({
+    available: false,
+    path: null
+  })
+  const [loPath, setLoPath] = useState('')
+  const [loBusy, setLoBusy] = useState(false)
+  const [loPreferred, setLoPreferred] = useState(false)
+  const [vscode, setVscode] = useState<{
+    available: boolean
+    path: string | null
+    extensions: number
+    settingsPath?: string
+    keybindingsPath?: string
+  }>({
+    available: false,
+    path: null,
+    extensions: 0
+  })
+  const [vscodeBusy, setVscodeBusy] = useState(false)
+  const [vscodeExtList, setVscodeExtList] = useState<string | null>(null)
+  const [gitPath, setGitPath] = useState('')
+  const [gitOutput, setGitOutput] = useState<string | null>(null)
+  const [gitBusy, setGitBusy] = useState(false)
   const [updateVersion, setUpdateVersion] = useState('')
   const [updateNotes, setUpdateNotes] = useState('')
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -119,6 +147,123 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
 
   const installUpdate = () => {
     window.electron.ipcRenderer.invoke('install-update')
+  }
+
+  // ─── LibreOffice (high-fidelity document conversion) ────────────────
+  useEffect(() => {
+    if (!window.electron?.ipcRenderer) return
+    window.electron.ipcRenderer
+      .invoke('get-libreoffice-status')
+      .then((r: any) => {
+        setLoStatus(r || { available: false, path: null })
+        setLoPreferred(!!r?.preferred)
+      })
+      .catch(() => {})
+  }, [])
+
+  const toggleLibreOfficePreference = async () => {
+    setLoBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('set-libreoffice-preference', !loPreferred)
+      setLoPreferred(!!r.preferred)
+      if (r.available !== undefined) setLoStatus({ available: r.available, path: r.path })
+    } finally {
+      setLoBusy(false)
+    }
+  }
+
+  // ─── VS Code status ─────────────────────────────────────────────────
+  const refreshVscode = async () => {
+    setVscodeBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('vscode-status')
+      setVscode(r || { available: false, path: null, extensions: 0 })
+    } catch {
+      setVscode({ available: false, path: null, extensions: 0 })
+    } finally {
+      setVscodeBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshVscode()
+  }, [])
+
+  const toggleVscodeExtensions = async () => {
+    if (vscodeExtList !== null) {
+      setVscodeExtList(null)
+      return
+    }
+    setVscodeBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('vscode-op', { action: 'list_extensions' })
+      setVscodeExtList(typeof r === 'string' ? r : 'No extensions found.')
+    } finally {
+      setVscodeBusy(false)
+    }
+  }
+
+  const openVscodeFile = async (which: 'settings' | 'keybindings') => {
+    const target = which === 'settings' ? vscode.settingsPath : vscode.keybindingsPath
+    if (!target) return
+    await window.electron.ipcRenderer.invoke('vscode-op', { action: 'open', path: target })
+  }
+
+  // ─── Git status ─────────────────────────────────────────────────────
+  const browseGitFolder = async () => {
+    const r = await window.electron.ipcRenderer.invoke('git-pick-folder')
+    if (r.success) setGitPath(r.path)
+  }
+
+  const runGitAction = async (action: 'status' | 'log') => {
+    if (!gitPath.trim()) {
+      setGitOutput('Pick or enter a project folder first.')
+      return
+    }
+    setGitBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('git-op', {
+        action,
+        cwd: gitPath.trim(),
+        count: 10
+      })
+      setGitOutput(typeof r === 'string' ? r : JSON.stringify(r))
+    } finally {
+      setGitBusy(false)
+    }
+  }
+
+  const browseLibreOffice = async () => {
+    setLoBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('pick-libreoffice-path')
+      if (r.success) {
+        setLoStatus({ available: true, path: r.path })
+        if (r.preferred !== undefined) setLoPreferred(!!r.preferred)
+        setLoPath('')
+      } else if (!r.canceled) {
+        alert(`❌ ${r.error || 'No LibreOffice found in the selected location.'}`)
+      }
+    } finally {
+      setLoBusy(false)
+    }
+  }
+
+  const saveLibreOfficePath = async () => {
+    if (!loPath.trim()) return
+    setLoBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('set-libreoffice-path', loPath.trim())
+      if (r.success) {
+        setLoStatus({ available: true, path: r.path })
+        if (r.preferred !== undefined) setLoPreferred(!!r.preferred)
+        setLoPath('')
+      } else {
+        alert(`❌ ${r.error || 'Invalid LibreOffice path.'}`)
+      }
+    } finally {
+      setLoBusy(false)
+    }
   }
 
   const handleVoiceChange = (v: 'MALE' | 'FEMALE') => {
@@ -243,7 +388,7 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
   const titleClass = 'text-sm font-semibold text-white flex items-center gap-2'
 
   return (
-    <div className="flex-1 p-6 md:p-10 lg:p-16 flex flex-col items-center bg-black min-h-screen text-zinc-100 overflow-y-auto scrollbar-small">
+    <div className="absolute inset-0 p-6 md:p-10 lg:p-16 flex flex-col items-center bg-black text-zinc-100 overflow-y-auto scrollbar-small">
       <motion.div
         className="w-full max-w-4xl flex flex-col gap-8"
         initial={{ opacity: 0 }}
@@ -319,7 +464,7 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
-                className="grid grid-cols-1 gap-6 absolute w-full"
+                className="grid grid-cols-1 gap-6 w-full"
               >
                 <div className={cardClass}>
                   <div className="flex items-center justify-between border-b border-white/10 pb-4">
@@ -414,7 +559,7 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
-                className="grid grid-cols-1 md:grid-cols-2 gap-6 absolute w-full"
+                className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full"
               >
                 <div className={`${cardClass} md:col-span-2`}>
                   <div className="flex justify-between items-center">
@@ -503,6 +648,233 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
                   )}
                 </div>
 
+                {/* Document Conversion Engine (LibreOffice) */}
+                <div className={`${cardClass} md:col-span-2`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiFileTransferLine className="text-zinc-400" size={18} /> Document Conversion
+                      Engine
+                    </span>
+                    {loPreferred && loStatus.available ? (
+                      <span className="text-[10px] text-emerald-400 font-mono tracking-widest flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                        <RiCheckboxCircleLine /> PIXEL-PERFECT ACTIVE
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-zinc-400 font-mono tracking-widest flex items-center gap-1 bg-white/5 px-2 py-1 rounded border border-white/10">
+                        <RiErrorWarningLine /> BUILT-IN ENGINE
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    Pixel-Perfect Mode renders office files (DOCX / PPTX / XLSX → PDF) through
+                    LibreOffice for exact fidelity, and is enabled automatically when LibreOffice is
+                    detected. Turn it off to use the silent built-in engine.
+                    {loStatus.available ? (
+                      <>
+                        {' '}
+                        Detected at <span className="text-zinc-300 break-all">{loStatus.path}</span>.
+                      </>
+                    ) : (
+                      ' LibreOffice not detected — set its path below to enable.'
+                    )}
+                  </p>
+
+                  <div className="flex items-center justify-between gap-4 py-1">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-200">
+                        Pixel-Perfect Mode (LibreOffice)
+                      </p>
+                      <p className="text-xs text-zinc-500 mt-0.5 leading-relaxed">
+                        Exact office-to-PDF fidelity. Note: if your default Windows printer is
+                        offline, LibreOffice may briefly prompt for a printer connection.
+                      </p>
+                    </div>
+                    <button
+                      onClick={toggleLibreOfficePreference}
+                      disabled={loBusy || !loStatus.available}
+                      title={!loStatus.available ? 'Set the LibreOffice path first' : ''}
+                      className={`shrink-0 relative w-12 h-6 rounded-full transition-colors border ${
+                        loPreferred && loStatus.available
+                          ? 'bg-emerald-500/30 border-emerald-500/50'
+                          : 'bg-white/5 border-white/10'
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      <span
+                        className="absolute top-0.5 rounded-full transition-all duration-200"
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          left: loPreferred && loStatus.available ? '26px' : '2px',
+                          background: loPreferred && loStatus.available ? '#34d399' : '#a1a1aa'
+                        }}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className={`${inputContainerClass} flex-1`}>
+                      <input
+                        type="text"
+                        value={loPath}
+                        onChange={(e) => setLoPath(e.target.value)}
+                        placeholder="Install folder, program folder, or soffice.exe (e.g. D:\\New Folder)"
+                        className="bg-transparent border-none outline-none text-sm text-zinc-100 w-full placeholder:text-zinc-600 font-medium"
+                      />
+                      <button
+                        onClick={saveLibreOfficePath}
+                        disabled={loBusy || !loPath.trim()}
+                        title="Save path"
+                        className="text-zinc-500 hover:text-white transition-colors ml-2 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <RiSave3Line size={20} />
+                      </button>
+                    </div>
+                    <button
+                      onClick={browseLibreOffice}
+                      disabled={loBusy}
+                      className="shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiFolderOpenLine size={14} /> {loBusy ? 'WORKING...' : 'BROWSE'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* VS Code Orchestration status */}
+                <div className={`${cardClass} md:col-span-2`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiCodeBoxLine className="text-zinc-400" size={18} /> VS Code Orchestration
+                    </span>
+                    {vscode.available ? (
+                      <span className="text-[10px] text-emerald-400 font-mono tracking-widest flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                        <RiCheckboxCircleLine /> VS CODE DETECTED
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-amber-400 font-mono tracking-widest flex items-center gap-1 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+                        <RiErrorWarningLine /> NOT FOUND
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    {vscode.available ? (
+                      <>
+                        Brutus can drive VS Code by voice — open files, install extensions, switch
+                        themes, comment/format code, go to symbols, run any command, and full Git.{' '}
+                        <span className="text-zinc-300">
+                          {vscode.extensions} extension{vscode.extensions === 1 ? '' : 's'} installed.
+                        </span>
+                      </>
+                    ) : (
+                      'VS Code was not found in the default install location. Install VS Code (with "Add to PATH") to enable code orchestration.'
+                    )}
+                  </p>
+
+                  {vscode.path && (
+                    <p className="text-[10px] font-mono text-zinc-600 -mt-2 break-all">{vscode.path}</p>
+                  )}
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={refreshVscode}
+                      disabled={vscodeBusy}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiRefreshLine size={14} className={vscodeBusy ? 'animate-spin' : ''} />
+                      {vscodeBusy ? 'CHECKING...' : 'RE-DETECT'}
+                    </button>
+                    {vscode.available && (
+                      <>
+                        <button
+                          onClick={toggleVscodeExtensions}
+                          disabled={vscodeBusy}
+                          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40"
+                        >
+                          <RiCodeBoxLine size={14} />
+                          {vscodeExtList !== null ? 'HIDE EXTENSIONS' : 'EXTENSIONS'}
+                        </button>
+                        <button
+                          onClick={() => openVscodeFile('settings')}
+                          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30"
+                        >
+                          <RiFolderOpenLine size={14} /> SETTINGS.JSON
+                        </button>
+                        <button
+                          onClick={() => openVscodeFile('keybindings')}
+                          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30"
+                        >
+                          <RiFolderOpenLine size={14} /> KEYBINDINGS.JSON
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {vscodeExtList !== null && (
+                    <pre className="max-h-48 overflow-y-auto scrollbar-small text-[11px] font-mono text-zinc-400 bg-[#050505] border border-white/10 rounded-lg p-4 whitespace-pre-wrap break-words">
+                      {vscodeExtList}
+                    </pre>
+                  )}
+                </div>
+
+                {/* Git status */}
+                <div className={`${cardClass} md:col-span-2`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiTerminalWindowLine className="text-zinc-400" size={18} /> Git
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono tracking-widest flex items-center gap-1 bg-white/5 px-2 py-1 rounded border border-white/10">
+                      SAFE MODE
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    Brutus can run git by voice — status, commit, push, branches, stash, log and more
+                    in any repo. Pick a project folder to inspect it here.
+                  </p>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className={`${inputContainerClass} flex-1`}>
+                      <input
+                        type="text"
+                        value={gitPath}
+                        onChange={(e) => setGitPath(e.target.value)}
+                        placeholder="Project folder (git repository)…"
+                        className="bg-transparent border-none outline-none text-sm text-zinc-100 w-full placeholder:text-zinc-600 font-medium"
+                      />
+                    </div>
+                    <button
+                      onClick={browseGitFolder}
+                      className="shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30"
+                    >
+                      <RiFolderOpenLine size={14} /> BROWSE
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={() => runGitAction('status')}
+                      disabled={gitBusy}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiRefreshLine size={14} className={gitBusy ? 'animate-spin' : ''} /> STATUS
+                    </button>
+                    <button
+                      onClick={() => runGitAction('log')}
+                      disabled={gitBusy}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiTerminalWindowLine size={14} /> RECENT COMMITS
+                    </button>
+                  </div>
+
+                  {gitOutput !== null && (
+                    <pre className="max-h-48 overflow-y-auto scrollbar-small text-[11px] font-mono text-zinc-400 bg-[#050505] border border-white/10 rounded-lg p-4 whitespace-pre-wrap break-words">
+                      {gitOutput}
+                    </pre>
+                  )}
+                </div>
+
                 {/* Clear Chat History Card */}
                 <div className={`${cardClass} md:col-span-2 border-red-500/20 hover:border-red-500/30`}>
                   <div className="flex justify-between items-center">
@@ -540,7 +912,7 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
-                className="grid grid-cols-1 gap-6 absolute w-full"
+                className="grid grid-cols-1 gap-6 w-full"
               >
                 <div className={`${cardClass} gap-6`}>
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">

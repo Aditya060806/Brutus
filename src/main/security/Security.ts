@@ -28,6 +28,15 @@ export default function registerSecurityVault() {
     return true
   })
 
+  ipcMain.handle('get-language', () => {
+    return (store.get('brutus_language') as string | undefined) || ''
+  })
+
+  ipcMain.handle('set-language', (_, language: string) => {
+    store.set('brutus_language', language)
+    return true
+  })
+
   ipcMain.handle('setup-vault-pin', async (_, pin: string) => {
     const salt = await bcrypt.genSalt(10)
     const hash = await bcrypt.hash(pin, salt)

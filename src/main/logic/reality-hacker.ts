@@ -29,7 +29,7 @@ export default function registerRealityHacker(ipcMain: IpcMain) {
       await new Promise((resolve) => setTimeout(resolve, 3000))
 
       // 🟩 1. THE OMNIPRESENT BRUTUS THEME (UNIVERSAL)
-      if (mode === 'red_theme' || mode === 'both') {
+      if (mode === 'emerald_theme' || mode === 'red_theme' || mode === 'both') {
         const themeScript = `
           const style = document.createElement('style');
           style.innerHTML = \`
