@@ -6,17 +6,9 @@ const StoreClass = (Store as any).default || Store
 const store = new StoreClass()
 
 export default function registerSecurityVault() {
-  const legacyFace = store.get('brutus_vault_face') as number[] | undefined
-  if (legacyFace && !store.get('brutus_vault_faces')) {
-    store.set('brutus_vault_faces', [legacyFace])
-    store.delete('brutus_vault_face')
-  }
-
   ipcMain.handle('check-vault-status', () => {
     const hasPin = !!store.get('brutus_vault_hash')
-    const faces = store.get('brutus_vault_faces') as number[][] | undefined
-    const hasFace = faces && faces.length > 0
-    return { hasPin, hasFace, faceCount: faces ? faces.length : 0 }
+    return { hasPin }
   })
 
   ipcMain.handle('get-personality', () => {
@@ -48,29 +40,5 @@ export default function registerSecurityVault() {
     const hash = store.get('brutus_vault_hash') as string
     if (!hash) return false
     return await bcrypt.compare(pin, hash)
-  })
-
-  ipcMain.handle('setup-vault-face', (_, descriptor: number[]) => {
-    const faces = (store.get('brutus_vault_faces') as number[][]) || []
-    faces.push(descriptor)
-    store.set('brutus_vault_faces', faces)
-    return true
-  })
-
-  ipcMain.handle('verify-vault-face', (_, descriptor: number[]) => {
-    const faces = store.get('brutus_vault_faces') as number[][] | undefined
-    if (!faces || faces.length === 0) return false
-
-    for (const savedFace of faces) {
-      if (savedFace.length !== 128) continue
-      let distance = 0
-      for (let i = 0; i < descriptor.length; i++) {
-        distance += Math.pow(descriptor[i] - savedFace[i], 2)
-      }
-      distance = Math.sqrt(distance)
-
-      if (distance < 0.55) return true
-    }
-    return false
   })
 }
