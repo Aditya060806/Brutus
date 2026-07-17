@@ -28,10 +28,12 @@ export default function ChatPanel({ open, onClose }: ChatPanelProps) {
       if (cancelled) return
       const mapped = (h || [])
         .slice(-30)
-        .map((m: any): ChatMessage => ({
-          role: m.role === 'model' ? 'model' : 'user',
-          text: m.parts?.[0]?.text || ''
-        }))
+        .map(
+          (m: any): ChatMessage => ({
+            role: m.role === 'model' ? 'model' : 'user',
+            text: m.parts?.[0]?.text || ''
+          })
+        )
         .filter((m) => m.text)
       setMessages(mapped)
     })
@@ -51,9 +53,17 @@ export default function ChatPanel({ open, onClose }: ChatPanelProps) {
     setInput('')
     setMessages((m) => [...m, { role: 'user', text }])
     setBusy(true)
-    const res = await sendTextChat(text)
-    setMessages((m) => [...m, { role: 'model', text: res.text }])
-    setBusy(false)
+    try {
+      const res = await sendTextChat(text)
+      const reply =
+        res.text && res.text.trim() ? res.text : '⚠️ No response received. Please try again.'
+      setMessages((m) => [...m, { role: 'model', text: reply }])
+    } catch (err) {
+      setMessages((m) => [...m, { role: 'model', text: `❌ System error: ${String(err)}` }])
+    } finally {
+      setBusy(false)
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {

@@ -44,17 +44,18 @@ export const sendTextChat = async (message: string): Promise<TextChatResult> => 
     const trimmed = message.trim()
     if (!trimmed) return { success: false, text: 'Please enter a message.' }
 
+    // The Brain Node is the primary LLM; the Gemini key is only needed for the
+    // fallback. So we pass it along but never block chat when it's absent —
+    // the main process decides routing and returns a clear error if neither
+    // the Brain Node nor a Gemini fallback is available.
     const geminiKey = await getGeminiKey()
-    if (!geminiKey) {
-      return {
-        success: false,
-        text: '⚠️ Missing Gemini API Key. Add it in the Command Center (Settings) Vault to use text chat.'
-      }
-    }
 
-    const personality = await window.electron.ipcRenderer.invoke('get-personality')
-    const language = await window.electron.ipcRenderer.invoke('get-language')
-    const history = await getHistory()
+    // A failed personality/language lookup should never block a chat message.
+    const [personality, language, history] = await Promise.all([
+      window.electron.ipcRenderer.invoke('get-personality').catch(() => ''),
+      window.electron.ipcRenderer.invoke('get-language').catch(() => ''),
+      getHistory()
+    ])
     const systemInstruction = buildSystemInstruction(personality, language)
 
     await saveMessage('user', trimmed)
