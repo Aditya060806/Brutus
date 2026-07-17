@@ -24,7 +24,7 @@ export default function StockWidget() {
 
   if (!isVisible || !stock) return null
 
-  const c1 = stock.isPositive1 ? '#ef4444' : '#ef4444'
+  const c1 = stock.isPositive1 ? '#22c55e' : '#ef4444'
   const c2 = stock.isPositive2 ? '#3b82f6' : '#f59e0b'
 
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -82,7 +82,7 @@ export default function StockWidget() {
           </div>
           <button
             onClick={() => setIsVisible(false)}
-            className="p-3 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-xl transition-all"
+            className="brutus-close p-3 bg-red-500/10 text-red-500 rounded-xl"
           >
             <RiCloseLine size={20} />
           </button>

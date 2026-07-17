@@ -163,7 +163,7 @@ export default function OracleWidget() {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="w-full max-w-4xl bg-[#050505] border border-red-500/30 rounded-2xl shadow-[0_0_100px_rgba(239, 68, 68,0.15)] overflow-hidden flex flex-col relative"
+          className="w-full max-w-4xl bg-[#050505] border border-red-500/30 rounded-2xl shadow-[0_0_100px_rgba(239,68,68,0.15)] overflow-hidden flex flex-col relative"
         >
           <motion.div
             className={`absolute top-0 left-0 h-0.5 z-10 transition-colors ${status === 'cancelled' ? 'bg-red-500' : 'bg-red-500'}`}
@@ -264,7 +264,7 @@ export default function OracleWidget() {
                   </div>
                   <div className="w-full h-3 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800 relative">
                     <motion.div
-                      className="h-full bg-red-500 shadow-[0_0_15px_rgba(239, 68, 68,0.5)] rounded-full absolute top-0 left-0"
+                      className="h-full bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] rounded-full absolute top-0 left-0"
                       initial={{ width: 0 }}
                       animate={{ width: `${percentRaw}%` }}
                       transition={{ ease: 'easeInOut', duration: 0.3 }}

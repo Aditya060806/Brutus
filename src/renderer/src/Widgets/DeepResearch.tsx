@@ -118,7 +118,7 @@ export default function ResearchWidget() {
               </h3>
             </div>
             {isSuccess === true && (
-              <CheckCircle2 className="w-6 h-6 text-red-500 shadow-[0_0_20px_rgba(239, 68, 68,0.5)] rounded-full" />
+              <CheckCircle2 className="w-6 h-6 text-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] rounded-full" />
             )}
           </div>
 

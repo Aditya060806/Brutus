@@ -403,7 +403,7 @@ function Editor() {
   }
 
   return (
-    <div className="flex h-full w-full bg-[#09090b] relative overflow-hidden">
+    <div className="flex h-full w-full bg-[#09090b] relative overflow-hidden animate-in fade-in duration-300">
       <div
         className={`fixed top-14 left-0 h-[calc(100vh-56px)] bg-[#111113] border-r border-[#27272a] p-4 flex flex-col gap-1 transition-all duration-300 ease-in-out z-40 scrollbar-small overflow-auto mt-5 ${isSidebarOpen ? 'w-72 opacity-100' : 'w-0 opacity-0'}`}
       >
@@ -485,7 +485,7 @@ function Editor() {
 
           <button
             onClick={saveWorkflow}
-            className="bg-red-600 hover:bg-red-500 text-black px-6 py-2 rounded-lg text-[11px] font-black tracking-widest transition-all shadow-[0_0_20px_rgba(239, 68, 68,0.3)] flex items-center gap-2 cursor-pointer"
+            className="bg-red-600 hover:bg-red-500 text-black px-6 py-2 rounded-lg text-[11px] font-black tracking-widest transition-all shadow-[0_0_20px_rgba(239,68,68,0.3)] flex items-center gap-2 cursor-pointer"
           >
             <RiSave3Line size={16} /> SAVE
           </button>

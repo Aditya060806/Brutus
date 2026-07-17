@@ -15,6 +15,160 @@ body {
   }
 }
 
+/* ── Brutus dashboard motion primitives (GPU-only: transform/opacity) ── */
+@keyframes brutus-aura-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes brutus-pulse-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes brutus-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes brutus-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Entrance utilities (self-contained tailwindcss-animate subset) ──
+   These class names are used in 21+ components but Tailwind v4 ships no
+   `animate-in` plugin, so they were silently dead. Implemented here with the
+   same CSS-variable composition model so `animate-in fade-in zoom-in ...`
+   combinations work. Runs once on mount — no perf/re-render cost. */
+@keyframes brutus-enter {
+  from {
+    opacity: var(--brutus-enter-opacity, 1);
+    transform: translate3d(var(--brutus-enter-x, 0), var(--brutus-enter-y, 0), 0)
+      scale3d(var(--brutus-enter-scale, 1), var(--brutus-enter-scale, 1), 1);
+  }
+}
+
+.animate-in {
+  animation-name: brutus-enter;
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+  will-change: transform, opacity;
+}
+
+.fade-in {
+  --brutus-enter-opacity: 0;
+}
+.zoom-in {
+  --brutus-enter-scale: 0.95;
+}
+.zoom-in-50 {
+  --brutus-enter-scale: 0.5;
+}
+.slide-in-from-bottom-2 {
+  --brutus-enter-y: 0.5rem;
+}
+.slide-in-from-bottom-4 {
+  --brutus-enter-y: 1rem;
+}
+.slide-in-from-right-8 {
+  --brutus-enter-x: 2rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none;
+  }
+}
+
+/* Shared widget close-button affordance — consistent hover across every widget.
+   Add `brutus-close` to a close button for a uniform red-tinted, rotating hover. */
+.brutus-close {
+  transition:
+    color 0.25s ease,
+    background-color 0.25s ease,
+    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.brutus-close:hover {
+  color: rgb(252 165 165);
+  background-color: rgba(239, 68, 68, 0.15);
+  transform: rotate(90deg);
+}
+
+/* Reusable hover-lift for interactive cards/tiles */
+.brutus-lift {
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
+}
+.brutus-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(239, 68, 68, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brutus-close:hover,
+  .brutus-lift:hover {
+    transform: none;
+  }
+}
+
+/* Rotating conic halo behind the core sphere while the link is live */
+.brutus-aura {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(239, 68, 68, 0.28) 60deg,
+    transparent 140deg,
+    rgba(239, 68, 68, 0.16) 220deg,
+    transparent 320deg
+  );
+  animation: brutus-aura-spin 14s linear infinite;
+  will-change: transform;
+}
+
+/* Expanding concentric rings around the active call button */
+.brutus-ring {
+  animation: brutus-pulse-ring 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  will-change: transform, opacity;
+}
+
+/* Travelling light sweep for hardware/telemetry bars */
+.brutus-bar-sheen {
+  animation: brutus-shimmer 2.6s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brutus-aura,
+  .brutus-ring,
+  .brutus-bar-sheen {
+    animation: none;
+  }
+}
+
 .drag-region {
   -webkit-app-region: drag;
 }
@@ -28,8 +182,26 @@ button, input, textarea {
 }
 
 .scrollbar-small {
-  scrollbar-color: #9b9b9b transparent;
-  scrollbar-width: auto;
+  scrollbar-color: rgba(239, 68, 68, 0.35) transparent;
+  scrollbar-width: thin;
+}
+
+.scrollbar-small::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-small::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-small::-webkit-scrollbar-thumb {
+  background: rgba(239, 68, 68, 0.25);
+  border-radius: 9999px;
+}
+
+.scrollbar-small::-webkit-scrollbar-thumb:hover {
+  background: rgba(239, 68, 68, 0.5);
 }
 
 .react-flow__controls {

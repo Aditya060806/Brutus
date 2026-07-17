@@ -69,7 +69,7 @@ export default function MacroManagementMenu({ loadMacroToCanvas }: MacroMenuProp
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setIsMainOpen(!isMainOpen)}
-        className={`flex items-center gap-3 px-4 py-2 bg-[#18181b] border rounded-lg text-sm text-zinc-300 font-medium transition-all cursor-pointer ${isMainOpen ? 'border-red-500 shadow-[0_0_15px_rgba(239, 68, 68,0.3)]' : 'border-[#27272a] hover:border-zinc-700'}`}
+        className={`flex items-center gap-3 px-4 py-2 bg-[#18181b] border rounded-lg text-sm text-zinc-300 font-medium transition-all cursor-pointer ${isMainOpen ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border-[#27272a] hover:border-zinc-700'}`}
       >
         <RiBrainLine className="text-red-500" />
         Neural Patterns ({workflows.length})

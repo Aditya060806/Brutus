@@ -8,14 +8,21 @@ import {
   RiNodeTree,
   RiFileChartLine,
   RiErrorWarningLine,
-  RiDownloadLine
+  RiDownloadLine,
+  RiRefreshLine,
+  RiCheckboxCircleFill,
+  RiHardDrive2Line
 } from 'react-icons/ri'
+import { SiObsidian } from 'react-icons/si'
 
 const STAGE_LABEL: Record<string, string> = {
-  scanning: 'Discovering documents',
+  scanning: 'Scanning source',
   extracting: 'Reading documents',
   reasoning: 'Extracting entities & relationships',
   ingested: 'Document ingested',
+  linking: 'Linking notes & tags',
+  embedding: 'Embedding for Q&A',
+  enriching: 'AI entity enrichment',
   done: 'Done',
   error: 'Error'
 }
@@ -26,7 +33,10 @@ const TYPE_COLORS: Record<string, string> = {
   Material: '#22c55e', Personnel: '#14b8a6', Procedure: '#06b6d4', Regulation: '#3b82f6',
   Standard: '#6366f1', Incident: '#dc2626', WorkOrder: '#8b5cf6', Inspection: '#a855f7',
   Area: '#ec4899', System: '#f43f5e', Vendor: '#0ea5e9', FailureMode: '#fb7185',
-  Hazard: '#f97316', Document: '#94a3b8', Date: '#64748b', Metric: '#10b981'
+  Hazard: '#f97316', Document: '#94a3b8', Date: '#64748b', Metric: '#10b981',
+  // Obsidian knowledge vocabulary
+  Note: '#22d3ee', Topic: '#f59e0b', Concept: '#a78bfa', Person: '#34d399',
+  Place: '#f472b6', Attachment: '#94a3b8'
 }
 const colorOf = (t: string): string => TYPE_COLORS[t] || '#94a3b8'
 
@@ -44,6 +54,9 @@ interface Stats {
   viz?: { nodes: VizNode[]; edges: VizEdge[] }
 }
 
+const slugName = (s: string): string =>
+  (s || 'obsidian').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'obsidian'
+
 const getGeminiKey = async (): Promise<string> => {
   try {
     const keys = await window.electron.ipcRenderer.invoke('secure-get-keys')
@@ -55,7 +68,7 @@ const getGeminiKey = async (): Promise<string> => {
 
 export default function KnowledgeGraphWidget() {
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'build' | 'ask' | 'graph'>('build')
+  const [tab, setTab] = useState<'build' | 'obsidian' | 'ask' | 'graph'>('build')
   const [graphName, setGraphName] = useState('default')
   const [target, setTarget] = useState('')
   const [busy, setBusy] = useState(false)
@@ -68,6 +81,21 @@ export default function KnowledgeGraphWidget() {
   const [asking, setAsking] = useState(false)
   const [answer, setAnswer] = useState('')
   const [sources, setSources] = useState<string[]>([])
+
+  // ── Obsidian ──
+  const [vaults, setVaults] = useState<any[]>([])
+  const [vaultPath, setVaultPath] = useState('')
+  const [vaultsLoading, setVaultsLoading] = useState(false)
+  const [vaultsLoaded, setVaultsLoaded] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [obsErr, setObsErr] = useState('')
+  const [obsOpts, setObsOpts] = useState({
+    includeTags: true,
+    includeUnresolved: false,
+    includeAttachments: false,
+    embed: true,
+    aiEnrich: false
+  })
 
   const logRef = useRef<HTMLDivElement>(null)
 
@@ -106,6 +134,74 @@ export default function KnowledgeGraphWidget() {
       if (r?.success && r.path) setTarget(r.path)
     } catch {
       /* user can paste a path manually */
+    }
+  }
+
+  // ── Obsidian: discover vaults registered on this machine ──
+  const loadVaults = useCallback(async () => {
+    setVaultsLoading(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('kg-obsidian-vaults')
+      if (r?.success) {
+        const vs = r.vaults || []
+        setVaults(vs)
+        setVaultPath((prev) => {
+          if (prev) return prev
+          const auto = vs.find((v: any) => v.open && v.exists) || vs.find((v: any) => v.exists)
+          if (auto) {
+            setGraphName((g) => (!g || g === 'default' ? slugName(auto.name) : g))
+            return auto.path
+          }
+          return prev
+        })
+      }
+    } catch {
+      /* ignore — manual browse still works */
+    } finally {
+      setVaultsLoading(false)
+      setVaultsLoaded(true)
+    }
+  }, [])
+
+  const selectVault = (v: any): void => {
+    setVaultPath(v.path)
+    setGraphName((g) => (!g || g === 'default' ? slugName(v.name) : g))
+  }
+
+  const browseVault = async (): Promise<void> => {
+    try {
+      const r = await window.electron.ipcRenderer.invoke('kg-pick-target')
+      if (r?.success && r.path) setVaultPath(r.path)
+    } catch {
+      /* paste manually */
+    }
+  }
+
+  const importVault = async (): Promise<void> => {
+    if (!vaultPath.trim() || importing) return
+    const geminiKey = await getGeminiKey()
+    setImporting(true)
+    setObsErr('')
+    setLog([])
+    setStage('scanning')
+    try {
+      const r = await window.electron.ipcRenderer.invoke('kg-obsidian-import', {
+        vaultPath: vaultPath.trim(),
+        graphName: graphName.trim() || 'obsidian',
+        geminiKey,
+        options: obsOpts
+      })
+      if (r?.success) {
+        setStats(r)
+        setTab('graph')
+        await refreshStats(graphName.trim() || 'obsidian')
+      } else {
+        setObsErr(r?.error || 'Import failed.')
+      }
+    } catch (e) {
+      setObsErr(String(e))
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -191,13 +287,13 @@ export default function KnowledgeGraphWidget() {
                 Knowledge Graph
               </span>
               <span className="text-[10px] font-mono text-cyan-400/60 tracking-widest mt-0.5">
-                INDUSTRIAL OPERATIONS BRAIN
+                OPERATIONS & OBSIDIAN KNOWLEDGE BRAIN
               </span>
             </div>
           </div>
           <button
             onClick={() => setOpen(false)}
-            className="p-1.5 text-zinc-500 hover:text-white rounded-full hover:bg-white/5 transition-all"
+            className="brutus-close p-1.5 text-zinc-500 rounded-full"
           >
             <RiCloseLine size={20} />
           </button>
@@ -207,6 +303,7 @@ export default function KnowledgeGraphWidget() {
         <div className="flex items-center gap-1 px-6 pt-3">
           {([
             ['build', 'Build', RiNodeTree],
+            ['obsidian', 'Obsidian', SiObsidian],
             ['ask', 'Ask', RiSearchLine],
             ['graph', 'Graph', RiFileChartLine]
           ] as const).map(([id, label, Icon]) => (
@@ -215,6 +312,7 @@ export default function KnowledgeGraphWidget() {
               onClick={() => {
                 setTab(id)
                 if (id === 'graph') refreshStats(graphName.trim() || 'default')
+                if (id === 'obsidian' && !vaultsLoaded) loadVaults()
               }}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-t-lg text-xs font-bold tracking-widest uppercase transition-all ${
                 tab === id
@@ -249,6 +347,25 @@ export default function KnowledgeGraphWidget() {
               logRef={logRef}
               buildErr={buildErr}
               stats={stats}
+            />
+          )}
+          {tab === 'obsidian' && (
+            <ObsidianTab
+              vaults={vaults}
+              vaultPath={vaultPath}
+              setVaultPath={setVaultPath}
+              vaultsLoading={vaultsLoading}
+              loadVaults={loadVaults}
+              selectVault={selectVault}
+              browseVault={browseVault}
+              importVault={importVault}
+              importing={importing}
+              obsOpts={obsOpts}
+              setObsOpts={setObsOpts}
+              obsErr={obsErr}
+              stage={stage}
+              log={log}
+              logRef={logRef}
             />
           )}
           {tab === 'ask' && (
@@ -347,6 +464,186 @@ function BuildTab(props: any) {
               <div className="text-[10px] text-zinc-500 uppercase tracking-widest">{k as string}</div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── OBSIDIAN TAB ───────────────────────────────────────────────────────
+function ObsidianTab(props: any) {
+  const {
+    vaults, vaultPath, setVaultPath, vaultsLoading, loadVaults, selectVault,
+    browseVault, importVault, importing, obsOpts, setObsOpts, obsErr, stage, log, logRef
+  } = props
+
+  const toggle = (k: string): void => setObsOpts((o: any) => ({ ...o, [k]: !o[k] }))
+  const OPTIONS: [string, string, string][] = [
+    ['includeTags', 'Include #tags', 'Turn tags into Topic nodes and link notes to them'],
+    ['embed', 'Embed for Q&A', 'Vectorise note text so you can ask questions (needs Gemini key)'],
+    ['includeUnresolved', 'Unresolved links', 'Keep [[links]] that point to notes you haven’t created yet'],
+    ['includeAttachments', 'Attachments', 'Add embedded images/PDFs as Attachment nodes'],
+    ['aiEnrich', 'AI enrichment', 'Also run AI entity extraction on note text (slower, uses key)']
+  ]
+
+  return (
+    <div className="space-y-5">
+      {/* vault discovery */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase flex items-center gap-1.5">
+            <SiObsidian className="text-violet-400" size={13} /> Detected Vaults
+          </label>
+          <button
+            onClick={loadVaults}
+            disabled={vaultsLoading}
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-cyan-300 transition-colors disabled:opacity-40"
+          >
+            <RiRefreshLine className={vaultsLoading ? 'animate-spin' : ''} size={13} /> Rescan
+          </button>
+        </div>
+
+        {vaultsLoading && vaults.length === 0 ? (
+          <div className="flex items-center gap-2 text-xs text-zinc-500 font-mono py-4 justify-center">
+            <RiLoader4Line className="animate-spin" size={14} /> Reading Obsidian config…
+          </div>
+        ) : vaults.length === 0 ? (
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-[11px] text-amber-300/90">
+            No Obsidian vaults registered on this machine. Use <b>Browse</b> below to point Brutus at
+            any vault folder manually.
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {vaults.map((v: any) => {
+              const active = vaultPath === v.path
+              return (
+                <button
+                  key={v.id || v.path}
+                  onClick={() => selectVault(v)}
+                  disabled={!v.exists || importing}
+                  className={`brutus-lift text-left rounded-xl border p-3 flex items-center gap-3 transition-all ${
+                    active
+                      ? 'border-violet-500/50 bg-violet-500/10'
+                      : 'border-white/10 bg-white/5 hover:border-violet-500/30'
+                  } ${!v.exists ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <div className={`p-2 rounded-lg ${active ? 'bg-violet-500/20' : 'bg-black/40'}`}>
+                    <SiObsidian className={active ? 'text-violet-300' : 'text-zinc-400'} size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-zinc-100 truncate">{v.name}</span>
+                      {v.open && (
+                        <span className="text-[8px] font-bold tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 rounded px-1.5 py-0.5">
+                          OPEN
+                        </span>
+                      )}
+                      {!v.exists && (
+                        <span className="text-[8px] font-bold tracking-widest text-red-400">MISSING</span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 font-mono truncate">{v.path}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-bold text-cyan-300">{v.noteCount ?? '—'}</div>
+                    <div className="text-[8px] text-zinc-600 uppercase tracking-widest">notes</div>
+                  </div>
+                  {active && <RiCheckboxCircleFill className="text-violet-400 shrink-0" size={18} />}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* manual path */}
+      <div>
+        <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase">
+          Vault folder
+        </label>
+        <div className="mt-2 flex gap-2">
+          <input
+            value={vaultPath}
+            onChange={(e) => setVaultPath(e.target.value)}
+            disabled={importing}
+            placeholder="Select a vault above, or browse to any Obsidian folder"
+            className="flex-1 bg-[#050505] border border-white/10 rounded-lg px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/40 disabled:opacity-50"
+          />
+          <button
+            onClick={browseVault}
+            disabled={importing}
+            className="flex items-center gap-2 px-3 rounded-lg bg-white/5 border border-white/10 text-zinc-300 hover:border-violet-500/40 text-xs font-bold transition-all disabled:opacity-50"
+          >
+            <RiFolderOpenLine size={16} /> Browse
+          </button>
+        </div>
+      </div>
+
+      {/* options */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {OPTIONS.map(([key, label, hint]) => (
+          <button
+            key={key}
+            onClick={() => toggle(key)}
+            disabled={importing}
+            className={`text-left rounded-lg border p-2.5 transition-all disabled:opacity-50 ${
+              obsOpts[key]
+                ? 'border-cyan-500/40 bg-cyan-500/10'
+                : 'border-white/10 bg-white/5 hover:border-white/20'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-3.5 w-3.5 rounded flex items-center justify-center border ${
+                  obsOpts[key] ? 'bg-cyan-500 border-cyan-400' : 'border-zinc-600'
+                }`}
+              >
+                {obsOpts[key] && <RiCheckboxCircleFill className="text-black" size={10} />}
+              </span>
+              <span className="text-xs font-bold text-zinc-200">{label}</span>
+            </div>
+            <div className="text-[10px] text-zinc-500 mt-1 leading-snug">{hint}</div>
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={importVault}
+        disabled={importing || !vaultPath.trim()}
+        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/40 text-violet-200 text-sm font-bold tracking-widest uppercase transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        {importing ? <RiLoader4Line className="animate-spin" size={18} /> : <SiObsidian size={16} />}
+        {importing ? 'Importing Vault…' : 'Import Vault → Graph'}
+      </button>
+
+      <p className="text-[11px] text-zinc-500 -mt-2 flex items-start gap-1.5">
+        <RiHardDrive2Line size={13} className="mt-0.5 shrink-0" />
+        Notes become nodes; <b className="text-zinc-400 font-semibold mx-1">[[wikilinks]]</b>, tags &
+        frontmatter become relationships — built offline & free. Re-import merges new notes/links.
+      </p>
+
+      {(importing || log.length > 0) && (
+        <div
+          ref={logRef}
+          className="max-h-40 overflow-y-auto scrollbar-small bg-[#050505] border border-white/10 rounded-lg p-3 space-y-1.5"
+        >
+          {log.map((line: string, i: number) => (
+            <div key={i} className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+              <span className="text-violet-400/60">›</span> {line}
+            </div>
+          ))}
+          {importing && (
+            <div className="flex items-center gap-2 text-xs font-mono text-violet-300">
+              <RiLoader4Line className="animate-spin" size={13} />
+              {STAGE_LABEL[stage] || 'Working'}…
+            </div>
+          )}
+        </div>
+      )}
+
+      {obsErr && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 flex items-center gap-2 text-red-300 text-sm">
+          <RiErrorWarningLine size={18} /> {obsErr}
         </div>
       )}
     </div>

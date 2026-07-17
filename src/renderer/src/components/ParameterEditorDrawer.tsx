@@ -138,7 +138,7 @@ const AppSelector = ({ value, onChange }: { value: string; onChange: (val: strin
           const AppRow = (
             <div
               onClick={() => onChange(app.name)}
-              className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all duration-300 transform active:scale-95 group ${isSelected ? 'bg-red-500/15 border border-red-500/60 shadow-[0_0_15px_rgba(239, 68, 68,0.15)] order-first' : 'hover:bg-[#18181b] border border-transparent hover:border-white/5'}`}
+              className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all duration-300 transform active:scale-95 group ${isSelected ? 'bg-red-500/15 border border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.15)] order-first' : 'hover:bg-[#18181b] border border-transparent hover:border-white/5'}`}
             >
               <div className="flex items-center gap-3 overflow-hidden">
                 <div
@@ -286,7 +286,7 @@ export default function ParameterEditorDrawer({ nodeData, updateNodeInputs, clos
       <div className="p-4 border-t border-[#27272a] bg-[#18181b]">
         <button
           onClick={handleSave}
-          className="w-full bg-red-600 hover:bg-red-500 text-black py-2.5 rounded-lg text-[11px] font-black tracking-widest transition-all shadow-[0_0_15px_rgba(239, 68, 68,0.2)] flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full bg-red-600 hover:bg-red-500 text-black py-2.5 rounded-lg text-[11px] font-black tracking-widest transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] flex items-center justify-center gap-2 cursor-pointer"
         >
           <RiSave3Line size={16} /> APPLY CHANGES
         </button>

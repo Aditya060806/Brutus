@@ -134,7 +134,7 @@ export default function DeckStudioWidget() {
           </div>
           <button
             onClick={() => setOpen(false)}
-            className="p-1.5 text-zinc-500 hover:text-white rounded-full hover:bg-white/5 transition-all"
+            className="brutus-close p-1.5 text-zinc-500 rounded-full"
           >
             <RiCloseLine size={20} />
           </button>

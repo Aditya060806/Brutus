@@ -72,7 +72,7 @@ export default function LiveCodingWidget() {
 
   return (
     <div className="absolute inset-0 z-999 flex items-center justify-center bg-black/60 backdrop-blur-sm p-10">
-      <div className="w-full max-w-4xl h-[70vh] flex flex-col bg-[#0a0a0a] border border-red-500/30 rounded-xl shadow-[0_0_50px_rgba(239, 68, 68,0.1)] overflow-hidden">
+      <div className="w-full max-w-4xl h-[70vh] flex flex-col bg-[#0a0a0a] border border-red-500/30 rounded-xl shadow-[0_0_50px_rgba(239,68,68,0.1)] overflow-hidden">
         <div className="h-12 bg-black border-b border-white/5 flex items-center justify-between px-4">
           <div className="flex items-center gap-3">
             <Sparkles
@@ -93,7 +93,7 @@ export default function LiveCodingWidget() {
             )}
             <button
               onClick={() => setIsVisible(false)}
-              className="p-1 hover:bg-red-500/20 text-zinc-500 hover:text-red-400 rounded transition cursor-pointer"
+              className="brutus-close p-1 text-zinc-500 rounded cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>

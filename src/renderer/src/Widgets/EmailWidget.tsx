@@ -63,7 +63,7 @@ export default function EmailWidget() {
 
   return (
     <div className="fixed inset-0 z-9050 flex items-center justify-center bg-black/90 backdrop-blur-md p-10 animate-in fade-in zoom-in duration-300">
-      <div className="relative w-full max-w-5xl h-[85vh] border-2 border-red-500/50 rounded-3xl overflow-hidden shadow-[0_0_100px_rgba(239, 68, 68,0.15)] bg-zinc-950 flex flex-col">
+      <div className="relative w-full max-w-5xl h-[85vh] border-2 border-red-500/50 rounded-3xl overflow-hidden shadow-[0_0_100px_rgba(239,68,68,0.15)] bg-zinc-950 flex flex-col">
         <div className="flex items-center justify-between p-6 border-b border-white/5 bg-black/50 shrink-0 z-10">
           <div className="flex items-center gap-4">
             {selectedEmail ? (
@@ -74,7 +74,7 @@ export default function EmailWidget() {
                 <RiArrowLeftLine size={24} />
               </button>
             ) : (
-              <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20 shadow-[0_0_15px_rgba(239, 68, 68,0.2)]">
+              <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.2)]">
                 <RiMailSendLine className="text-red-400" size={24} />
               </div>
             )}
@@ -92,7 +92,7 @@ export default function EmailWidget() {
           </div>
           <button
             onClick={() => setIsVisible(false)}
-            className="p-3 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/50 hover:border-red-500 rounded-xl transition-all"
+            className="brutus-close p-3 bg-red-500/10 text-red-500 border border-red-500/50 rounded-xl"
           >
             <RiCloseLine size={20} />
           </button>

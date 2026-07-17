@@ -26,7 +26,7 @@ export default function WormholeWidget() {
 
   return (
     <div className="absolute inset-0 z-999 flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-300 p-8">
-      <div className="w-full max-w-3xl bg-[#050505] border border-red-500/30 rounded-2xl shadow-[0_0_80px_rgba(239, 68, 68,0.15)] overflow-hidden flex flex-col relative">
+      <div className="w-full max-w-3xl bg-[#050505] border border-red-500/30 rounded-2xl shadow-[0_0_80px_rgba(239,68,68,0.15)] overflow-hidden flex flex-col relative">
         <div className="h-14 bg-red-500/10 border-b border-red-500/20 flex items-center justify-between px-6">
           <div className="flex items-center gap-3">
             <CloudLightning className="w-5 h-5 text-red-400 animate-pulse" />
@@ -36,7 +36,7 @@ export default function WormholeWidget() {
           </div>
           <button
             onClick={() => setIsVisible(false)}
-            className="text-zinc-500 hover:text-red-400 transition-colors p-2 hover:bg-white/5 rounded-full"
+            className="brutus-close text-zinc-500 p-2 rounded-full"
           >
             <X className="w-5 h-5" />
           </button>
@@ -79,7 +79,7 @@ export default function WormholeWidget() {
             </div>
 
             <div className="flex items-center gap-3 mt-auto">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239, 68, 68,0.8)]"></div>
+              <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]"></div>
               <span className="text-xs font-mono text-red-500/70 uppercase tracking-widest">
                 Connection Stable
               </span>
