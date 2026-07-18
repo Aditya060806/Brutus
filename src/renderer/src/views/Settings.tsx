@@ -1,0 +1,1294 @@
+import { useEffect, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { GiArtificialIntelligence } from 'react-icons/gi'
+import {
+  RiKey2Line,
+  RiSave3Line,
+  RiUserVoiceLine,
+  RiUserLine,
+  RiLockPasswordLine,
+  RiRecordCircleLine,
+  RiLock2Line,
+  RiSettings4Line,
+  RiShieldKeyholeLine,
+  RiPlugLine,
+  RiBrainLine,
+  RiCloudLine,
+  RiCpuLine,
+  RiTerminalWindowLine,
+  RiRefreshLine,
+  RiDownloadCloud2Line,
+  RiRocketLine,
+  RiDeleteBin6Line,
+  RiFileTransferLine,
+  RiCheckboxCircleLine,
+  RiErrorWarningLine,
+  RiFolderOpenLine,
+  RiCodeBoxLine
+} from 'react-icons/ri'
+
+import BridgePanel from '@renderer/components/BridgePanel'
+
+interface SettingsProps {
+  isSystemActive: boolean
+}
+
+type TabType = 'updates' | 'general' | 'keys' | 'security'
+
+const SettingsView = ({ isSystemActive }: SettingsProps) => {
+  const [activeTab, setActiveTab] = useState<TabType>('updates')
+
+  const [voice, setVoice] = useState<'MALE' | 'FEMALE'>(
+    (localStorage.getItem('brutus_voice_profile') as 'MALE' | 'FEMALE') || 'MALE'
+  )
+  const [voiceEngine, setVoiceEngine] = useState<'cloud' | 'server'>(
+    (localStorage.getItem('brutus_voice_engine') as 'cloud' | 'server') || 'cloud'
+  )
+  const [personality, setPersonality] = useState('')
+  const [userName, setUserName] = useState(localStorage.getItem('brutus_user_name') || 'Aditya')
+
+  const [geminiKey, setGeminiKey] = useState(localStorage.getItem('brutus_custom_api_key') || '')
+  const [groqKey, setGroqKey] = useState(localStorage.getItem('brutus_groq_api_key') || '')
+  const [hfKey, setHfKey] = useState(localStorage.getItem('brutus_hf_api_key') || '')
+  const [tailvyKey, setTailvyKey] = useState(localStorage.getItem('brutus_tailvy_api_key') || '')
+
+  // ─── Brain Node (edge inference routing) ────────────────────────────
+  const [brainUrl, setBrainUrl] = useState('http://10.113.246.106:8080')
+  const [brainKey, setBrainKey] = useState('')
+  const [brainEnabled, setBrainEnabled] = useState(true)
+  const [brainBusy, setBrainBusy] = useState(false)
+  const [brainChecking, setBrainChecking] = useState(false)
+  const [brainHealth, setBrainHealth] = useState<{
+    reachable: boolean
+    chatReady: boolean
+    baseUrl?: string
+    health?: any
+  } | null>(null)
+
+  const [isSecurityUnlocked, setIsSecurityUnlocked] = useState(false)
+  const [authPin, setAuthPin] = useState('')
+  const [authError, setAuthError] = useState(false)
+  const [isClearingHistory, setIsClearingHistory] = useState(false)
+  const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false)
+
+  const [appVersion, setAppVersion] = useState('...')
+  const [updateStatus, setUpdateStatus] = useState<
+    'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
+  >('idle')
+  const [loStatus, setLoStatus] = useState<{ available: boolean; path: string | null }>({
+    available: false,
+    path: null
+  })
+  const [loPath, setLoPath] = useState('')
+  const [loBusy, setLoBusy] = useState(false)
+  const [loPreferred, setLoPreferred] = useState(false)
+  const [vscode, setVscode] = useState<{
+    available: boolean
+    path: string | null
+    extensions: number
+    settingsPath?: string
+    keybindingsPath?: string
+  }>({
+    available: false,
+    path: null,
+    extensions: 0
+  })
+  const [vscodeBusy, setVscodeBusy] = useState(false)
+  const [vscodeExtList, setVscodeExtList] = useState<string | null>(null)
+  const [gitPath, setGitPath] = useState('')
+  const [gitOutput, setGitOutput] = useState<string | null>(null)
+  const [gitBusy, setGitBusy] = useState(false)
+  const [updateVersion, setUpdateVersion] = useState('')
+  const [updateNotes, setUpdateNotes] = useState('')
+  const [downloadProgress, setDownloadProgress] = useState(0)
+
+  const clearChatHistory = async () => {
+    if (!clearHistoryConfirm) {
+      setClearHistoryConfirm(true)
+      setTimeout(() => setClearHistoryConfirm(false), 4000)
+      return
+    }
+    setIsClearingHistory(true)
+    try {
+      await window.electron.ipcRenderer.invoke('clear-history')
+      setClearHistoryConfirm(false)
+      alert('✅ Chat history cleared successfully.')
+    } catch (e) {
+      alert('❌ Failed to clear history.')
+    } finally {
+      setIsClearingHistory(false)
+    }
+  }
+
+  const [newPin, setNewPin] = useState('')
+
+  useEffect(() => {
+    if (window.electron?.ipcRenderer) {
+      window.electron.ipcRenderer.invoke('get-personality').then((res) => {
+        if (res) setPersonality(res)
+      })
+    }
+  }, [])
+
+  // Load the saved Brain Node config and probe it once on mount.
+  useEffect(() => {
+    if (!window.electron?.ipcRenderer) return
+    window.electron.ipcRenderer
+      .invoke('llm-config-get')
+      .then((cfg: any) => {
+        if (cfg) {
+          if (cfg.baseUrl) setBrainUrl(cfg.baseUrl)
+          setBrainKey(cfg.apiKey || '')
+          setBrainEnabled(cfg.enabled !== false)
+        }
+      })
+      .catch(() => {})
+    window.electron.ipcRenderer
+      .invoke('brain-health')
+      .then((r: any) => setBrainHealth(r || { reachable: false, chatReady: false }))
+      .catch(() => setBrainHealth({ reachable: false, chatReady: false }))
+  }, [])
+
+  useEffect(() => {
+    if (!window.electron?.ipcRenderer) return
+    window.electron.ipcRenderer.invoke('get-app-version').then((v: string) => setAppVersion(v))
+    const handler = (_: unknown, { status, version, notes, progress }: any) => {
+      setUpdateStatus(status)
+      if (version) setUpdateVersion(version)
+      if (notes) setUpdateNotes(notes)
+      if (progress !== undefined) setDownloadProgress(progress)
+    }
+    window.electron.ipcRenderer.on('updater-event', handler)
+    return () => {
+      window.electron.ipcRenderer.removeAllListeners('updater-event')
+    }
+  }, [])
+
+  const checkForUpdates = () => {
+    setUpdateStatus('checking')
+    window.electron.ipcRenderer.invoke('check-for-updates')
+  }
+
+  const downloadUpdate = () => {
+    window.electron.ipcRenderer.invoke('download-update')
+  }
+
+  const installUpdate = () => {
+    window.electron.ipcRenderer.invoke('install-update')
+  }
+
+  // ─── LibreOffice (high-fidelity document conversion) ────────────────
+  useEffect(() => {
+    if (!window.electron?.ipcRenderer) return
+    window.electron.ipcRenderer
+      .invoke('get-libreoffice-status')
+      .then((r: any) => {
+        setLoStatus(r || { available: false, path: null })
+        setLoPreferred(!!r?.preferred)
+      })
+      .catch(() => {})
+  }, [])
+
+  const toggleLibreOfficePreference = async () => {
+    setLoBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('set-libreoffice-preference', !loPreferred)
+      setLoPreferred(!!r.preferred)
+      if (r.available !== undefined) setLoStatus({ available: r.available, path: r.path })
+    } finally {
+      setLoBusy(false)
+    }
+  }
+
+  // ─── VS Code status ─────────────────────────────────────────────────
+  const refreshVscode = async () => {
+    setVscodeBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('vscode-status')
+      setVscode(r || { available: false, path: null, extensions: 0 })
+    } catch {
+      setVscode({ available: false, path: null, extensions: 0 })
+    } finally {
+      setVscodeBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshVscode()
+  }, [])
+
+  const toggleVscodeExtensions = async () => {
+    if (vscodeExtList !== null) {
+      setVscodeExtList(null)
+      return
+    }
+    setVscodeBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('vscode-op', { action: 'list_extensions' })
+      setVscodeExtList(typeof r === 'string' ? r : 'No extensions found.')
+    } finally {
+      setVscodeBusy(false)
+    }
+  }
+
+  const openVscodeFile = async (which: 'settings' | 'keybindings') => {
+    const target = which === 'settings' ? vscode.settingsPath : vscode.keybindingsPath
+    if (!target) return
+    await window.electron.ipcRenderer.invoke('vscode-op', { action: 'open', path: target })
+  }
+
+  // ─── Git status ─────────────────────────────────────────────────────
+  const browseGitFolder = async () => {
+    const r = await window.electron.ipcRenderer.invoke('git-pick-folder')
+    if (r.success) setGitPath(r.path)
+  }
+
+  const runGitAction = async (action: 'status' | 'log') => {
+    if (!gitPath.trim()) {
+      setGitOutput('Pick or enter a project folder first.')
+      return
+    }
+    setGitBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('git-op', {
+        action,
+        cwd: gitPath.trim(),
+        count: 10
+      })
+      setGitOutput(typeof r === 'string' ? r : JSON.stringify(r))
+    } finally {
+      setGitBusy(false)
+    }
+  }
+
+  const browseLibreOffice = async () => {
+    setLoBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('pick-libreoffice-path')
+      if (r.success) {
+        setLoStatus({ available: true, path: r.path })
+        if (r.preferred !== undefined) setLoPreferred(!!r.preferred)
+        setLoPath('')
+      } else if (!r.canceled) {
+        alert(`❌ ${r.error || 'No LibreOffice found in the selected location.'}`)
+      }
+    } finally {
+      setLoBusy(false)
+    }
+  }
+
+  const saveLibreOfficePath = async () => {
+    if (!loPath.trim()) return
+    setLoBusy(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('set-libreoffice-path', loPath.trim())
+      if (r.success) {
+        setLoStatus({ available: true, path: r.path })
+        if (r.preferred !== undefined) setLoPreferred(!!r.preferred)
+        setLoPath('')
+      } else {
+        alert(`❌ ${r.error || 'Invalid LibreOffice path.'}`)
+      }
+    } finally {
+      setLoBusy(false)
+    }
+  }
+
+  const handleVoiceChange = (v: 'MALE' | 'FEMALE') => {
+    if (isSystemActive) return
+    setVoice(v)
+    localStorage.setItem('brutus_voice_profile', v)
+  }
+
+  const handleVoiceEngineChange = (v: 'cloud' | 'server') => {
+    if (isSystemActive) return
+    setVoiceEngine(v)
+    localStorage.setItem('brutus_voice_engine', v)
+  }
+
+  const handlePersonalityChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = e.target.value
+    const words = text
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 0)
+    if (words.length <= 150) setPersonality(text)
+  }
+
+  const savePersonality = async () => {
+    if (window.electron?.ipcRenderer) {
+      await window.electron.ipcRenderer.invoke('set-personality', personality)
+      alert('Personality Matrix Saved Securely to OS.')
+    }
+  }
+
+  const saveUserName = () => {
+    localStorage.setItem('brutus_user_name', userName)
+    alert('User Designation Saved.')
+  }
+
+  const saveApiKeys = async () => {
+    localStorage.setItem('brutus_custom_api_key', geminiKey)
+    localStorage.setItem('brutus_groq_api_key', groqKey)
+    localStorage.setItem('brutus_hf_api_key', hfKey)
+    localStorage.setItem('brutus_tailvy_api_key', tailvyKey)
+
+    if (window.electron?.ipcRenderer) {
+      try {
+        await window.electron.ipcRenderer.invoke('secure-save-keys', {
+          groqKey,
+          geminiKey
+        })
+      } catch (e) {}
+    }
+
+    alert(
+      'All Neural Uplinks (API Keys) secured locally and in OS Vault. Restart AI modules to apply.'
+    )
+  }
+
+  const refreshBrainHealth = async () => {
+    if (!window.electron?.ipcRenderer) return
+    setBrainChecking(true)
+    try {
+      const r = await window.electron.ipcRenderer.invoke('brain-health')
+      setBrainHealth(r || { reachable: false, chatReady: false })
+    } catch {
+      setBrainHealth({ reachable: false, chatReady: false })
+    } finally {
+      setBrainChecking(false)
+    }
+  }
+
+  const saveBrainConfig = async () => {
+    if (!window.electron?.ipcRenderer) return
+    setBrainBusy(true)
+    try {
+      const cfg = await window.electron.ipcRenderer.invoke('llm-config-set', {
+        baseUrl: brainUrl.trim(),
+        apiKey: brainKey.trim(),
+        enabled: brainEnabled
+      })
+      if (cfg) {
+        if (cfg.baseUrl) setBrainUrl(cfg.baseUrl)
+        setBrainKey(cfg.apiKey || '')
+        setBrainEnabled(cfg.enabled !== false)
+      }
+      await refreshBrainHealth()
+    } finally {
+      setBrainBusy(false)
+    }
+  }
+
+  const currentWordCount = personality
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length
+
+  const unlockSecurityModule = async () => {
+    if (!window.electron?.ipcRenderer) return
+    const isValid = await window.electron.ipcRenderer.invoke('verify-vault-pin', authPin)
+    if (isValid) {
+      setIsSecurityUnlocked(true)
+      setAuthPin('')
+    } else {
+      setAuthError(true)
+      setTimeout(() => setAuthError(false), 1000)
+    }
+  }
+
+  const updateMasterPin = async () => {
+    if (newPin.length !== 4 || !window.electron?.ipcRenderer) return
+    await window.electron.ipcRenderer.invoke('setup-vault-pin', newPin)
+    setNewPin('')
+    alert('Master PIN Updated Successfully.')
+  }
+
+  const cardClass =
+    'bg-[#0f0f13] border border-white/10 p-6 md:p-8 rounded-2xl flex flex-col gap-5 hover:border-white/20 transition-all shadow-lg'
+  const inputContainerClass =
+    'flex items-center bg-[#050505] border border-white/10 rounded-lg px-4 py-3 focus-within:border-white/30 focus-within:bg-black transition-all duration-300 w-full'
+  const titleClass = 'text-sm font-semibold text-white flex items-center gap-2'
+
+  return (
+    <div className="absolute inset-0 p-6 md:p-10 lg:p-16 flex flex-col items-center bg-black text-zinc-100 overflow-y-auto scrollbar-small animate-in fade-in duration-300">
+      <motion.div
+        className="w-full max-w-4xl flex flex-col gap-8"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/10 pb-6">
+          <div className="flex items-center gap-5">
+            <div className="p-4 bg-[#111] rounded-2xl border border-white/10 flex items-center justify-center shadow-[0_0_15px_rgba(255,255,255,0.03)]">
+              <GiArtificialIntelligence size={36} className="text-white" />
+            </div>
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight text-white">Command Center</h2>
+              <p className="text-xs text-zinc-400 font-mono mt-1 tracking-widest flex items-center gap-2 uppercase">
+                <RiRecordCircleLine
+                  className={`${isSystemActive ? 'text-red-400 animate-pulse shadow-[0_0_8px_#f87171]' : 'text-zinc-600'}`}
+                  size={14}
+                />
+                {isSystemActive ? 'System Online' : 'System Offline'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex bg-[#0a0a0c] p-1 rounded-xl border border-white/10 w-full md:w-fit shadow-lg overflow-x-auto scrollbar-none">
+            <button
+              onClick={() => setActiveTab('updates')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 text-xs font-bold tracking-widest rounded-lg transition-all duration-300 ${
+                activeTab === 'updates'
+                  ? 'bg-white text-black shadow-md'
+                  : 'text-zinc-500 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <RiTerminalWindowLine size={16} /> SYSTEM
+            </button>
+            <button
+              onClick={() => setActiveTab('general')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 text-xs font-bold tracking-widest rounded-lg transition-all duration-300 ${
+                activeTab === 'general'
+                  ? 'bg-white text-black shadow-md'
+                  : 'text-zinc-500 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <RiSettings4Line size={16} /> GENERAL
+            </button>
+            <button
+              onClick={() => setActiveTab('keys')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 text-xs font-bold tracking-widest rounded-lg transition-all duration-300 ${
+                activeTab === 'keys'
+                  ? 'bg-white text-black shadow-md'
+                  : 'text-zinc-500 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <RiPlugLine size={16} /> API KEYS
+            </button>
+            <button
+              onClick={() => setActiveTab('security')}
+              className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 text-xs font-bold tracking-widest rounded-lg transition-all duration-300 ${
+                activeTab === 'security'
+                  ? 'bg-white text-black shadow-md'
+                  : 'text-zinc-500 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <RiShieldKeyholeLine size={16} /> SECURITY
+            </button>
+          </div>
+        </div>
+
+        <div className="relative min-h-125 pb-12 mt-2">
+          <AnimatePresence mode="wait">
+            {activeTab === 'updates' && (
+              <motion.div
+                key="updates"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="grid grid-cols-1 gap-6 w-full"
+              >
+                <div className={cardClass}>
+                  <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                    <span className={titleClass}>
+                      <RiTerminalWindowLine className="text-zinc-400" size={18} /> System Update
+                      Control
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-500 bg-white/5 px-3 py-1 rounded-md border border-white/10">
+                      v{appVersion}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={checkForUpdates}
+                      disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white/5 border border-white/10 text-xs font-bold tracking-widest text-zinc-300 hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiRefreshLine
+                        size={14}
+                        className={updateStatus === 'checking' ? 'animate-spin' : ''}
+                      />
+                      {updateStatus === 'checking' ? 'CHECKING...' : 'CHECK FOR UPDATES'}
+                    </button>
+
+                    {updateStatus === 'available' && (
+                      <button
+                        onClick={downloadUpdate}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs font-bold tracking-widest text-blue-400 hover:bg-blue-500/20 transition-all"
+                      >
+                        <RiDownloadCloud2Line size={14} /> DOWNLOAD UPDATE
+                      </button>
+                    )}
+
+                    {updateStatus === 'ready' && (
+                      <button
+                        onClick={installUpdate}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-green-500/10 border border-green-500/30 text-xs font-bold tracking-widest text-green-400 hover:bg-green-500/20 transition-all"
+                      >
+                        <RiRocketLine size={14} /> INSTALL & RESTART
+                      </button>
+                    )}
+                  </div>
+
+                  {updateStatus === 'downloading' && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex justify-between text-[10px] font-mono text-zinc-500">
+                        <span>DOWNLOADING...</span>
+                        <span>{downloadProgress}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-black/50 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-white/70 rounded-full transition-all duration-300"
+                          style={{ width: `${downloadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {updateStatus === 'error' && (
+                    <p className="text-xs text-red-400 font-mono">
+                      Update failed. Check your connection and try again.
+                    </p>
+                  )}
+
+                  {updateStatus === 'idle' && (
+                    <p className="text-xs text-zinc-600 font-mono">
+                      {updateVersion
+                        ? `Latest: v${updateVersion}`
+                        : 'Click "Check for Updates" to scan for new releases.'}
+                    </p>
+                  )}
+
+                  {updateStatus === 'available' && updateVersion && (
+                    <p className="text-xs text-blue-400 font-mono">
+                      v{updateVersion} is available for download.
+                    </p>
+                  )}
+
+                  {updateStatus === 'ready' && (
+                    <p className="text-xs text-green-400 font-mono">
+                      Update ready. Restart to apply.
+                    </p>
+                  )}
+                </div>
+
+                {updateNotes && (
+                  <div className={cardClass}>
+                    <span className={titleClass}>
+                      <RiTerminalWindowLine className="text-zinc-400" size={18} /> Patch Notes
+                    </span>
+                    <pre className="text-xs text-zinc-400 font-mono whitespace-pre-wrap leading-relaxed bg-black/30 p-4 rounded-lg border border-white/5 overflow-y-auto max-h-48 scrollbar-small">
+                      {updateNotes}
+                    </pre>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {activeTab === 'general' && (
+              <motion.div
+                key="general"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full"
+              >
+                <div className={`${cardClass} md:col-span-2`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiUserLine className="text-zinc-400" size={18} /> AI Personality Matrix
+                    </span>
+                    <div className="flex items-center gap-4">
+                      <span
+                        className={`text-[10px] font-mono tracking-widest ${currentWordCount >= 150 ? 'text-red-400' : 'text-zinc-400'}`}
+                      >
+                        {currentWordCount} / 150 WORDS
+                      </span>
+                      <button
+                        onClick={savePersonality}
+                        className="text-zinc-400 hover:text-white transition-colors bg-white/5 p-2 rounded-md hover:bg-white/10 border border-white/5"
+                      >
+                        <RiSave3Line size={18} />
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    value={personality}
+                    onChange={handlePersonalityChange}
+                    placeholder="Define who BRUTUS is. Example: 'You are a sassy, highly technical assistant...'"
+                    className="bg-[#050505] border border-white/10 rounded-lg p-4 text-sm text-zinc-200 h-32 resize-none focus:border-white/30 outline-none transition-all scrollbar-small"
+                  />
+                </div>
+
+                <div className={cardClass}>
+                  <div className="flex justify-between items-end">
+                    <span className={titleClass}>
+                      <RiUserLine className="text-zinc-400" size={18} /> User Designation
+                    </span>
+                  </div>
+                  <div className={inputContainerClass}>
+                    <input
+                      type="text"
+                      value={userName}
+                      onChange={(e) => setUserName(e.target.value)}
+                      placeholder="Enter operator name..."
+                      className="bg-transparent border-none outline-none text-sm text-zinc-100 w-full placeholder:text-zinc-600 font-medium"
+                    />
+                    <button
+                      onClick={saveUserName}
+                      className="text-zinc-500 hover:text-white transition-colors ml-2"
+                    >
+                      <RiSave3Line size={20} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className={`${cardClass} relative`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiUserVoiceLine className="text-zinc-400" size={18} /> OS Voice Profile
+                    </span>
+                    {isSystemActive && (
+                      <span className="text-[10px] text-red-400 font-mono tracking-widest flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">
+                        <RiLock2Line /> LOCKED AS BRUTUS IS CONNECTED
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className={`flex gap-3 h-12 mt-1 ${isSystemActive ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  >
+                    {(['FEMALE', 'MALE'] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => handleVoiceChange(s)}
+                        disabled={isSystemActive}
+                        className={`cursor-pointer flex-1 flex items-center justify-center text-[12px] font-bold rounded-lg transition-all tracking-widest border ${
+                          voice === s
+                            ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.2)]'
+                            : 'bg-[#050505] border-white/10 text-zinc-400 hover:text-white hover:border-white/30'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  {isSystemActive && (
+                    <div
+                      className="absolute inset-0 z-10"
+                      title="Disconnect AI to change voice"
+                    ></div>
+                  )}
+                </div>
+
+                {/* Voice Uplink — where the voice pipeline runs */}
+                <div className={`${cardClass} relative`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiCpuLine className="text-zinc-400" size={18} /> Voice Uplink
+                    </span>
+                    {isSystemActive && (
+                      <span className="text-[10px] text-red-400 font-mono tracking-widest flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">
+                        <RiLock2Line /> LOCKED WHILE ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    Choose where voice runs. Edge Server keeps speech-to-text, reasoning and speech
+                    fully on-device through the Brain Node. Cloud uses the streaming online engine.
+                  </p>
+                  <div
+                    className={`flex gap-3 h-12 mt-1 ${isSystemActive ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  >
+                    {(['EDGE SERVER', 'CLOUD'] as const).map((label) => {
+                      const val = label === 'EDGE SERVER' ? 'server' : 'cloud'
+                      const active = voiceEngine === val
+                      return (
+                        <button
+                          key={val}
+                          onClick={() => handleVoiceEngineChange(val)}
+                          disabled={isSystemActive}
+                          className={`cursor-pointer flex-1 flex items-center justify-center text-[12px] font-bold rounded-lg transition-all tracking-widest border ${
+                            active
+                              ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.2)]'
+                              : 'bg-[#050505] border-white/10 text-zinc-400 hover:text-white hover:border-white/30'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {isSystemActive && (
+                    <div
+                      className="absolute inset-0 z-10"
+                      title="Disconnect voice to change engine"
+                    ></div>
+                  )}
+                </div>
+
+                {/* Phone Bridge — wireless desktop <-> mobile orchestration */}
+                <BridgePanel />
+
+                {/* Document Conversion Engine (LibreOffice) */}
+                <div className={`${cardClass} md:col-span-2`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiFileTransferLine className="text-zinc-400" size={18} /> Document Conversion
+                      Engine
+                    </span>
+                    {loPreferred && loStatus.available ? (
+                      <span className="text-[10px] text-emerald-400 font-mono tracking-widest flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                        <RiCheckboxCircleLine /> PIXEL-PERFECT ACTIVE
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-zinc-400 font-mono tracking-widest flex items-center gap-1 bg-white/5 px-2 py-1 rounded border border-white/10">
+                        <RiErrorWarningLine /> BUILT-IN ENGINE
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    Pixel-Perfect Mode renders office files (DOCX / PPTX / XLSX → PDF) through
+                    LibreOffice for exact fidelity, and is enabled automatically when LibreOffice is
+                    detected. Turn it off to use the silent built-in engine.
+                    {loStatus.available ? (
+                      <>
+                        {' '}
+                        Detected at <span className="text-zinc-300 break-all">{loStatus.path}</span>
+                        .
+                      </>
+                    ) : (
+                      ' LibreOffice not detected — set its path below to enable.'
+                    )}
+                  </p>
+
+                  <div className="flex items-center justify-between gap-4 py-1">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-200">
+                        Pixel-Perfect Mode (LibreOffice)
+                      </p>
+                      <p className="text-xs text-zinc-500 mt-0.5 leading-relaxed">
+                        Exact office-to-PDF fidelity. Note: if your default Windows printer is
+                        offline, LibreOffice may briefly prompt for a printer connection.
+                      </p>
+                    </div>
+                    <button
+                      onClick={toggleLibreOfficePreference}
+                      disabled={loBusy || !loStatus.available}
+                      title={!loStatus.available ? 'Set the LibreOffice path first' : ''}
+                      className={`shrink-0 relative w-12 h-6 rounded-full transition-colors border ${
+                        loPreferred && loStatus.available
+                          ? 'bg-emerald-500/30 border-emerald-500/50'
+                          : 'bg-white/5 border-white/10'
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      <span
+                        className="absolute top-0.5 rounded-full transition-all duration-200"
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          left: loPreferred && loStatus.available ? '26px' : '2px',
+                          background: loPreferred && loStatus.available ? '#34d399' : '#a1a1aa'
+                        }}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className={`${inputContainerClass} flex-1`}>
+                      <input
+                        type="text"
+                        value={loPath}
+                        onChange={(e) => setLoPath(e.target.value)}
+                        placeholder="Install folder, program folder, or soffice.exe (e.g. D:\\New Folder)"
+                        className="bg-transparent border-none outline-none text-sm text-zinc-100 w-full placeholder:text-zinc-600 font-medium"
+                      />
+                      <button
+                        onClick={saveLibreOfficePath}
+                        disabled={loBusy || !loPath.trim()}
+                        title="Save path"
+                        className="text-zinc-500 hover:text-white transition-colors ml-2 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <RiSave3Line size={20} />
+                      </button>
+                    </div>
+                    <button
+                      onClick={browseLibreOffice}
+                      disabled={loBusy}
+                      className="shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiFolderOpenLine size={14} /> {loBusy ? 'WORKING...' : 'BROWSE'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* VS Code Orchestration status */}
+                <div className={`${cardClass} md:col-span-2`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiCodeBoxLine className="text-zinc-400" size={18} /> VS Code Orchestration
+                    </span>
+                    {vscode.available ? (
+                      <span className="text-[10px] text-emerald-400 font-mono tracking-widest flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                        <RiCheckboxCircleLine /> VS CODE DETECTED
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-amber-400 font-mono tracking-widest flex items-center gap-1 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+                        <RiErrorWarningLine /> NOT FOUND
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    {vscode.available ? (
+                      <>
+                        Brutus can drive VS Code by voice — open files, install extensions, switch
+                        themes, comment/format code, go to symbols, run any command, and full Git.{' '}
+                        <span className="text-zinc-300">
+                          {vscode.extensions} extension{vscode.extensions === 1 ? '' : 's'}{' '}
+                          installed.
+                        </span>
+                      </>
+                    ) : (
+                      'VS Code was not found in the default install location. Install VS Code (with "Add to PATH") to enable code orchestration.'
+                    )}
+                  </p>
+
+                  {vscode.path && (
+                    <p className="text-[10px] font-mono text-zinc-600 -mt-2 break-all">
+                      {vscode.path}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={refreshVscode}
+                      disabled={vscodeBusy}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiRefreshLine size={14} className={vscodeBusy ? 'animate-spin' : ''} />
+                      {vscodeBusy ? 'CHECKING...' : 'RE-DETECT'}
+                    </button>
+                    {vscode.available && (
+                      <>
+                        <button
+                          onClick={toggleVscodeExtensions}
+                          disabled={vscodeBusy}
+                          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40"
+                        >
+                          <RiCodeBoxLine size={14} />
+                          {vscodeExtList !== null ? 'HIDE EXTENSIONS' : 'EXTENSIONS'}
+                        </button>
+                        <button
+                          onClick={() => openVscodeFile('settings')}
+                          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30"
+                        >
+                          <RiFolderOpenLine size={14} /> SETTINGS.JSON
+                        </button>
+                        <button
+                          onClick={() => openVscodeFile('keybindings')}
+                          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30"
+                        >
+                          <RiFolderOpenLine size={14} /> KEYBINDINGS.JSON
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {vscodeExtList !== null && (
+                    <pre className="max-h-48 overflow-y-auto scrollbar-small text-[11px] font-mono text-zinc-400 bg-[#050505] border border-white/10 rounded-lg p-4 whitespace-pre-wrap break-words">
+                      {vscodeExtList}
+                    </pre>
+                  )}
+                </div>
+
+                {/* Git status */}
+                <div className={`${cardClass} md:col-span-2`}>
+                  <div className="flex justify-between items-center">
+                    <span className={titleClass}>
+                      <RiTerminalWindowLine className="text-zinc-400" size={18} /> Git
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono tracking-widest flex items-center gap-1 bg-white/5 px-2 py-1 rounded border border-white/10">
+                      SAFE MODE
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    Brutus can run git by voice — status, commit, push, branches, stash, log and
+                    more in any repo. Pick a project folder to inspect it here.
+                  </p>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className={`${inputContainerClass} flex-1`}>
+                      <input
+                        type="text"
+                        value={gitPath}
+                        onChange={(e) => setGitPath(e.target.value)}
+                        placeholder="Project folder (git repository)…"
+                        className="bg-transparent border-none outline-none text-sm text-zinc-100 w-full placeholder:text-zinc-600 font-medium"
+                      />
+                    </div>
+                    <button
+                      onClick={browseGitFolder}
+                      className="shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30"
+                    >
+                      <RiFolderOpenLine size={14} /> BROWSE
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={() => runGitAction('status')}
+                      disabled={gitBusy}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiRefreshLine size={14} className={gitBusy ? 'animate-spin' : ''} /> STATUS
+                    </button>
+                    <button
+                      onClick={() => runGitAction('log')}
+                      disabled={gitBusy}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiTerminalWindowLine size={14} /> RECENT COMMITS
+                    </button>
+                  </div>
+
+                  {gitOutput !== null && (
+                    <pre className="max-h-48 overflow-y-auto scrollbar-small text-[11px] font-mono text-zinc-400 bg-[#050505] border border-white/10 rounded-lg p-4 whitespace-pre-wrap break-words">
+                      {gitOutput}
+                    </pre>
+                  )}
+                </div>
+
+                {/* Clear Chat History Card */}
+                <div
+                  className={`${cardClass} md:col-span-2 border-red-500/20 hover:border-red-500/30`}
+                >
+                  <div className="flex justify-between items-center">
+                    <span className={`${titleClass} text-red-400`}>
+                      <RiDeleteBin6Line className="text-red-400" size={18} /> Danger Zone
+                    </span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-200">Clear Chat History</p>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        Permanently wipes all conversation memory. Brutus will forget everything
+                        you've discussed.
+                      </p>
+                    </div>
+                    <button
+                      onClick={clearChatHistory}
+                      disabled={isClearingHistory}
+                      className={`shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border ${
+                        clearHistoryConfirm
+                          ? 'bg-red-600 border-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)] animate-pulse'
+                          : 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20 hover:border-red-500/50'
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      <RiDeleteBin6Line size={14} />
+                      {isClearingHistory
+                        ? 'CLEARING...'
+                        : clearHistoryConfirm
+                          ? 'CONFIRM? CLICK AGAIN'
+                          : 'CLEAR HISTORY'}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'keys' && (
+              <motion.div
+                key="keys"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="grid grid-cols-1 gap-6 w-full"
+              >
+                <div className={`${cardClass} gap-6`}>
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                    <span className={titleClass}>
+                      <RiCpuLine className="text-zinc-400" size={18} /> Edge Inference — Brain Node
+                    </span>
+                    {brainChecking ? (
+                      <span className="text-[10px] text-amber-400 font-mono tracking-widest flex items-center gap-1 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+                        <RiRefreshLine className="animate-spin" /> CHECKING...
+                      </span>
+                    ) : brainHealth?.reachable && brainHealth?.chatReady ? (
+                      <span className="text-[10px] text-emerald-400 font-mono tracking-widest flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+                        <RiCheckboxCircleLine /> ONLINE • LLM READY
+                      </span>
+                    ) : brainHealth?.reachable ? (
+                      <span className="text-[10px] text-amber-400 font-mono tracking-widest flex items-center gap-1 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+                        <RiErrorWarningLine /> REACHABLE • LLM LOADING
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-red-400 font-mono tracking-widest flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">
+                        <RiErrorWarningLine /> OFFLINE • GEMINI FALLBACK
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
+                    All AI reasoning runs on the Snapdragon Brain Node over the network. If it is
+                    unreachable, Brutus automatically falls back to Gemini. UI generation always
+                    uses Gemini.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase flex items-center gap-2">
+                        <RiCpuLine size={14} /> Brain Node URL
+                      </label>
+                      <div className={inputContainerClass}>
+                        <input
+                          type="text"
+                          value={brainUrl}
+                          onChange={(e) => setBrainUrl(e.target.value)}
+                          placeholder="http://10.113.246.106:8080"
+                          className="bg-transparent border-none outline-none text-sm font-mono text-zinc-100 w-full placeholder:text-zinc-700"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase flex items-center gap-2">
+                        <RiKey2Line size={14} /> Access Token (optional)
+                      </label>
+                      <div className={inputContainerClass}>
+                        <input
+                          type="password"
+                          value={brainKey}
+                          onChange={(e) => setBrainKey(e.target.value)}
+                          placeholder="Bearer token — leave blank if the node is open"
+                          className="bg-transparent border-none outline-none text-sm font-mono text-zinc-100 w-full placeholder:text-zinc-700"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 py-1">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-200">Route AI to Brain Node</p>
+                      <p className="text-xs text-zinc-500 mt-0.5 leading-relaxed">
+                        When on, chat is served by the edge NPU first. When off, Brutus uses Gemini
+                        directly.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setBrainEnabled(!brainEnabled)}
+                      className={`shrink-0 relative w-12 h-6 rounded-full transition-colors border ${
+                        brainEnabled
+                          ? 'bg-emerald-500/30 border-emerald-500/50'
+                          : 'bg-white/5 border-white/10'
+                      }`}
+                    >
+                      <span
+                        className="absolute top-0.5 rounded-full transition-all duration-200"
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          left: brainEnabled ? '26px' : '2px',
+                          background: brainEnabled ? '#34d399' : '#a1a1aa'
+                        }}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      onClick={saveBrainConfig}
+                      disabled={brainBusy}
+                      className="bg-white text-black px-6 py-2.5 rounded-lg text-xs font-bold tracking-widest hover:bg-zinc-200 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.1)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiSave3Line size={16} /> {brainBusy ? 'SAVING...' : 'SAVE & CONNECT'}
+                    </button>
+                    <button
+                      onClick={refreshBrainHealth}
+                      disabled={brainChecking}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-xs font-bold tracking-widest transition-all border bg-white/5 border-white/10 text-zinc-300 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RiRefreshLine size={14} className={brainChecking ? 'animate-spin' : ''} />{' '}
+                      TEST CONNECTION
+                    </button>
+                  </div>
+
+                  {brainHealth && (
+                    <p className="text-[10px] font-mono text-zinc-600 break-all">
+                      {brainHealth.reachable
+                        ? `Connected • status: ${brainHealth.health?.status || 'ok'} • mode: ${brainHealth.health?.mode || '?'} • node: ${brainHealth.health?.node || 'brain-node'}`
+                        : 'Not reachable — chat is currently using the Gemini fallback.'}
+                    </p>
+                  )}
+                </div>
+
+                <div className={`${cardClass} gap-6`}>
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                    <span className={titleClass}>
+                      <RiKey2Line className="text-zinc-400" size={18} /> External API Endpoints
+                    </span>
+                    <button
+                      onClick={saveApiKeys}
+                      className="bg-white text-black px-6 py-2.5 rounded-lg text-xs font-bold tracking-widest hover:bg-zinc-200 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.1)] flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <RiSave3Line size={16} /> SAVE ALL KEYS
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase flex items-center gap-2">
+                        <RiBrainLine size={14} /> Gemini Pro Core
+                      </label>
+                      <div className={inputContainerClass}>
+                        <input
+                          type="password"
+                          value={geminiKey}
+                          onChange={(e) => setGeminiKey(e.target.value)}
+                          placeholder="AIzaSy_..."
+                          className="bg-transparent border-none outline-none text-sm font-mono text-zinc-100 w-full placeholder:text-zinc-700"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase flex items-center gap-2">
+                        <RiCpuLine size={14} /> Groq Fast Inferencing
+                      </label>
+                      <div className={inputContainerClass}>
+                        <input
+                          type="password"
+                          value={groqKey}
+                          onChange={(e) => setGroqKey(e.target.value)}
+                          placeholder="gsk_..."
+                          className="bg-transparent border-none outline-none text-sm font-mono text-zinc-100 w-full placeholder:text-zinc-700"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 md:col-span-2">
+                      <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase flex items-center gap-2">
+                        <RiCloudLine size={14} /> Hugging Face Vision
+                      </label>
+                      <div className={inputContainerClass}>
+                        <input
+                          type="password"
+                          value={hfKey}
+                          onChange={(e) => setHfKey(e.target.value)}
+                          placeholder="hf_..."
+                          className="bg-transparent border-none outline-none text-sm font-mono text-zinc-100 w-full placeholder:text-zinc-700"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 md:col-span-2">
+                      <label className="text-[10px] text-zinc-400 font-mono tracking-widest uppercase flex items-center gap-2">
+                        <RiPlugLine size={14} /> Tailvy Builder Agent
+                      </label>
+                      <div className={inputContainerClass}>
+                        <input
+                          type="password"
+                          value={tailvyKey}
+                          onChange={(e) => setTailvyKey(e.target.value)}
+                          placeholder="tlv_..."
+                          className="bg-transparent border-none outline-none text-sm font-mono text-zinc-100 w-full placeholder:text-zinc-700"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#050505] border border-white/5 p-4 rounded-xl mt-2 flex items-start gap-3">
+                    <RiShieldKeyholeLine className="text-zinc-500 shrink-0 mt-0.5" size={16} />
+                    <p className="text-[10px] text-zinc-400 font-mono leading-relaxed">
+                      [SECURITY NOTICE]: All API keys are encrypted and stored strictly in your
+                      local OS. BRUTUS does not transmit these keys to any centralized server. You
+                      maintain full ownership and billing control over your provider endpoints.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'security' && (
+              <motion.div
+                key="security"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="w-full rounded-3xl overflow-hidden shadow-2xl border border-white/5 absolute"
+              >
+                <AnimatePresence>
+                  {!isSecurityUnlocked && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                      className="absolute inset-0 z-50 backdrop-blur-2xl bg-black/70 border border-white/10 rounded-3xl flex flex-col items-center justify-center pointer-events-auto"
+                    >
+                      <div className="bg-[#111] p-5 rounded-full mb-6 border border-white/10 shadow-[0_0_30px_rgba(255,255,255,0.05)]">
+                        <RiLockPasswordLine size={40} className="text-white" />
+                      </div>
+                      <p className="text-xs text-zinc-300 font-mono tracking-widest uppercase mb-6 font-semibold">
+                        Authenticate to access Vault Settings
+                      </p>
+                      <div className="flex gap-3 items-center h-12 relative z-50 cursor-auto pointer-events-auto">
+                        <input
+                          type="password"
+                          maxLength={4}
+                          pattern="\d*"
+                          value={authPin}
+                          onChange={(e) => setAuthPin(e.target.value.replace(/\D/g, ''))}
+                          placeholder="PIN"
+                          className={`h-full bg-[#050505] border w-32 rounded-lg text-center text-xl tracking-[0.5em] text-white outline-none cursor-text transition-colors pointer-events-auto ${authError ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-white/20 focus:border-white focus:bg-[#111]'}`}
+                        />
+                        <button
+                          onClick={unlockSecurityModule}
+                          className="h-full px-8 bg-white text-black text-xs font-bold tracking-widest rounded-lg hover:bg-zinc-200 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.2)] cursor-pointer"
+                        >
+                          UNLOCK
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="grid grid-cols-1 gap-6 bg-[#0a0a0c] p-6 rounded-3xl border border-white/5">
+                  <div className="bg-[#111113] border border-white/10 p-7 rounded-2xl flex flex-col gap-5">
+                    <span className={titleClass}>
+                      <RiLockPasswordLine className="text-zinc-400" size={18} /> Update Master PIN
+                    </span>
+                    <div className={inputContainerClass}>
+                      <input
+                        type="password"
+                        maxLength={4}
+                        pattern="\d*"
+                        value={newPin}
+                        onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                        placeholder="Enter new 4-digit PIN..."
+                        className="bg-transparent border-none outline-none text-sm font-mono text-zinc-100 w-full tracking-[0.3em]"
+                      />
+                      <button
+                        onClick={updateMasterPin}
+                        className="text-zinc-500 hover:text-white transition-colors ml-2 cursor-pointer"
+                      >
+                        <RiSave3Line size={20} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+export default SettingsView
