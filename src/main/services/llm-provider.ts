@@ -1,0 +1,410 @@
+import { IpcMain, app, safeStorage } from 'electron'
+import fs from 'fs'
+import path from 'path'
+import Store from 'electron-store'
+import { GoogleGenAI } from '@google/genai'
+
+/**
+ * BRUTUS LLM Provider Adapter
+ * ---------------------------
+ * The Command PC does NO inference of its own. This adapter is the single
+ * gateway every text-generation call goes through:
+ *
+ *   • PRIMARY  → the Snapdragon "Brain Node" (OpenAI-shaped /v1/chat on the NPU)
+ *   • FALLBACK → Google Gemini, whenever the Brain Node is disabled, unreachable,
+ *                or errors mid-request.
+ *
+ * UI-generation features (Live Forge website builder, Architect) deliberately do
+ * NOT go through routing — they call Gemini directly and only borrow
+ * `resolveGeminiKey` from here so a key is always available. A small edge model
+ * can't produce that class of output, so those stay Gemini-only by design.
+ *
+ * The real-time voice loop (Gemini Live) is intentionally untouched: the Brain
+ * Node's /v1/chat exposes neither native audio nor function-calling, so routing
+ * the 90-tool loop there would silently break tools. That is a separate pipeline.
+ *
+ * Config resolution (highest priority first):
+ *   Brain URL    : env BRUTUS_BRAIN_URL   → stored config → http://10.113.246.106:8080 (LAN device)
+ *   Brain key    : env BRUTUS_API_KEY     → stored config → "" (open node)
+ *   Routing flag : env BRUTUS_LLM_ROUTING → stored config → enabled
+ *   Gemini key   : caller-passed          → env GEMINI_API_KEY → encrypted vault
+ */
+
+// ─── Types ────────────────────────────────────────────────────────────────
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResult {
+  text: string
+  emotion: string | null
+  backend: 'brain' | 'gemini' | 'none'
+  metrics?: unknown
+  error?: string
+}
+
+export interface BrainConfig {
+  baseUrl: string
+  apiKey: string
+  enabled: boolean
+  healthTimeoutMs: number
+  chatTimeoutMs: number
+}
+
+interface HealthResult {
+  ok: boolean
+  ts: number
+  data: any
+}
+
+// ─── Store (lazy — constructed on first use, after app is ready) ────────────
+let _store: any = null
+function getStore(): any {
+  if (!_store) {
+    const StoreClass: any = (Store as any).default || Store
+    _store = new StoreClass()
+  }
+  return _store
+}
+
+const CONFIG_KEY = 'brutus_brain_config'
+
+function parseBoolEnv(value: string | undefined): boolean | null {
+  if (value === undefined) return null
+  const v = value.trim().toLowerCase()
+  if (['off', 'false', '0', 'no'].includes(v)) return false
+  if (['on', 'true', '1', 'yes'].includes(v)) return true
+  return null
+}
+
+export function getBrainConfig(): BrainConfig {
+  let saved: Partial<BrainConfig> = {}
+  try {
+    saved = (getStore().get(CONFIG_KEY) as Partial<BrainConfig>) || {}
+  } catch {
+    saved = {}
+  }
+
+  // Defaults to the Snapdragon Brain Node on the LAN. Override any time via the
+  // BRUTUS_BRAIN_URL env var or the Settings → API Keys → Brain Node field.
+  const baseUrl = (process.env.BRUTUS_BRAIN_URL || saved.baseUrl || 'http://10.113.246.106:8080')
+    .trim()
+    .replace(/\/+$/, '')
+
+  const apiKey = (process.env.BRUTUS_API_KEY || saved.apiKey || '').trim()
+
+  const envRouting = parseBoolEnv(process.env.BRUTUS_LLM_ROUTING)
+  const enabled =
+    envRouting !== null ? envRouting : saved.enabled !== undefined ? saved.enabled : true
+
+  const healthTimeoutMs =
+    typeof saved.healthTimeoutMs === 'number' && saved.healthTimeoutMs > 0
+      ? saved.healthTimeoutMs
+      : 2500
+  const chatTimeoutMs =
+    typeof saved.chatTimeoutMs === 'number' && saved.chatTimeoutMs > 0 ? saved.chatTimeoutMs : 30000
+
+  return { baseUrl, apiKey, enabled, healthTimeoutMs, chatTimeoutMs }
+}
+
+export function setBrainConfig(patch: Partial<BrainConfig>): BrainConfig {
+  const current = getBrainConfig()
+  const next: BrainConfig = { ...current, ...patch }
+  if (typeof next.baseUrl === 'string') next.baseUrl = next.baseUrl.trim().replace(/\/+$/, '')
+  try {
+    getStore().set(CONFIG_KEY, {
+      baseUrl: next.baseUrl,
+      apiKey: next.apiKey,
+      enabled: next.enabled,
+      healthTimeoutMs: next.healthTimeoutMs,
+      chatTimeoutMs: next.chatTimeoutMs
+    })
+  } catch {
+    /* non-fatal — env/defaults still apply */
+  }
+  healthCache = null // force a fresh probe against the (possibly new) endpoint
+  return getBrainConfig()
+}
+
+// ─── Low-level Brain Node fetch (bearer auth + abort timeout) ───────────────
+async function brainFetch(pathname: string, init: any, timeoutMs: number): Promise<Response> {
+  const cfg = getBrainConfig()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const headers: Record<string, string> = { ...(init?.headers || {}) }
+    if (cfg.apiKey) headers['Authorization'] = `Bearer ${cfg.apiKey}`
+    return await fetch(`${cfg.baseUrl}${pathname}`, {
+      ...init,
+      headers,
+      signal: controller.signal
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ─── Health (cached, short TTL so a down node doesn't add latency per call) ──
+let healthCache: HealthResult | null = null
+const HEALTH_TTL_MS = 10000
+
+export async function checkBrainHealth(force = false): Promise<HealthResult> {
+  if (!force && healthCache && Date.now() - healthCache.ts < HEALTH_TTL_MS) {
+    return healthCache
+  }
+  const cfg = getBrainConfig()
+  try {
+    const res = await brainFetch('/health', { method: 'GET' }, cfg.healthTimeoutMs)
+    if (!res.ok) throw new Error(`/health returned ${res.status}`)
+    const data = await res.json()
+    healthCache = { ok: true, ts: Date.now(), data }
+  } catch (err) {
+    healthCache = { ok: false, ts: Date.now(), data: { error: String(err) } }
+  }
+  return healthCache
+}
+
+/** Is the Brain Node's LLM backend ready to serve chat? */
+function brainChatReady(data: any): boolean {
+  if (!data) return false
+  if (data.backends_loaded && typeof data.backends_loaded.llm === 'boolean') {
+    return data.backends_loaded.llm === true
+  }
+  // Fallback if the report shape differs: accept anything that isn't "starting".
+  return data.status === 'ok' || data.status === 'degraded'
+}
+
+// ─── Emotion tag parsing ("[EMOTION:happy] Hi" → { happy, "Hi" }) ───────────
+export function parseEmotion(text: string): { text: string; emotion: string | null } {
+  if (!text) return { text: '', emotion: null }
+  const m = text.match(/^\s*\[EMOTION:\s*([a-zA-Z_]+)\s*\]\s*/i)
+  if (m) return { emotion: m[1].toLowerCase(), text: text.slice(m[0].length) }
+  return { text, emotion: null }
+}
+
+// ─── Gemini key resolution (passed → env → encrypted local vault) ───────────
+export function resolveGeminiKey(passed?: string): string {
+  const p = (passed || '').trim()
+  if (p) return p
+
+  const env = (process.env.GEMINI_API_KEY || process.env.BRUTUS_GEMINI_API_KEY || '').trim()
+  if (env) return env
+
+  try {
+    const vaultPath = path.join(app.getPath('userData'), 'iris_secure_vault.json')
+    if (fs.existsSync(vaultPath)) {
+      const data = JSON.parse(fs.readFileSync(vaultPath, 'utf8'))
+      if (data?.gemini) {
+        if (safeStorage.isEncryptionAvailable()) {
+          return safeStorage.decryptString(Buffer.from(data.gemini, 'base64')).trim()
+        }
+        return Buffer.from(data.gemini, 'base64').toString('utf8').trim()
+      }
+    }
+  } catch {
+    /* ignore — treated as "no key" */
+  }
+  return ''
+}
+
+// ─── Backends ───────────────────────────────────────────────────────────────
+interface RunChatOptions {
+  messages: ChatMessage[]
+  systemInstruction?: string
+  geminiKey?: string
+  maxTokens?: number
+  temperature?: number
+}
+
+async function brainChat(opts: RunChatOptions): Promise<Omit<ChatResult, 'backend'>> {
+  const cfg = getBrainConfig()
+  const finalMessages: ChatMessage[] = []
+  if (opts.systemInstruction && opts.systemInstruction.trim()) {
+    finalMessages.push({ role: 'system', content: opts.systemInstruction })
+  }
+  finalMessages.push(...opts.messages)
+
+  const body: Record<string, unknown> = { messages: finalMessages, stream: false, raw: false }
+  if (typeof opts.maxTokens === 'number') body.max_tokens = opts.maxTokens
+  if (typeof opts.temperature === 'number') body.temperature = opts.temperature
+
+  const res = await brainFetch(
+    '/v1/chat',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    cfg.chatTimeoutMs
+  )
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    throw new Error(`Brain Node /v1/chat ${res.status}: ${errText.slice(0, 200)}`)
+  }
+  const json: any = await res.json()
+  const raw = json?.choices?.[0]?.message?.content ?? ''
+  const parsed = parseEmotion(String(raw))
+  return {
+    text: parsed.text,
+    emotion: json?.brutus?.emotion || parsed.emotion,
+    metrics: json?.brutus || null
+  }
+}
+
+async function geminiChat(
+  opts: RunChatOptions & { apiKey: string }
+): Promise<Omit<ChatResult, 'backend'>> {
+  const ai = new GoogleGenAI({ apiKey: opts.apiKey })
+
+  const contents = opts.messages
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: String(m.content ?? '') }]
+    }))
+    .filter((c) => c.parts[0].text.trim())
+
+  const config: any = {}
+  if (opts.systemInstruction && opts.systemInstruction.trim()) {
+    config.systemInstruction = opts.systemInstruction
+  }
+  if (typeof opts.temperature === 'number') config.temperature = opts.temperature
+  if (typeof opts.maxTokens === 'number') config.maxOutputTokens = opts.maxTokens
+
+  const res = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents,
+    config: Object.keys(config).length ? config : undefined
+  })
+
+  const text = typeof res.text === 'string' ? res.text : ''
+  const parsed = parseEmotion(text)
+  return { text: parsed.text, emotion: parsed.emotion, metrics: null }
+}
+
+/**
+ * The orchestrator: Brain Node primary, Gemini fallback. Never throws — always
+ * resolves to a ChatResult (with `error` set when neither backend can answer).
+ */
+export async function runChat(opts: RunChatOptions): Promise<ChatResult> {
+  const cfg = getBrainConfig()
+
+  if (cfg.enabled) {
+    const health = await checkBrainHealth()
+    if (health.ok && brainChatReady(health.data)) {
+      try {
+        const r = await brainChat(opts)
+        return { ...r, backend: 'brain' }
+      } catch (err) {
+        console.error('[LLM] Brain Node chat failed — falling back to Gemini:', err)
+        healthCache = null // re-probe on the next call rather than trusting stale "ok"
+      }
+    }
+  }
+
+  const key = resolveGeminiKey(opts.geminiKey)
+  if (!key) {
+    return {
+      text: '',
+      emotion: null,
+      backend: 'none',
+      error:
+        'No response available: the Brain Node is unreachable and no Gemini API key is configured for fallback.'
+    }
+  }
+  try {
+    const r = await geminiChat({ ...opts, apiKey: key })
+    return { ...r, backend: 'gemini' }
+  } catch (err) {
+    return { text: '', emotion: null, backend: 'none', error: String(err) }
+  }
+}
+
+// ─── Brain Node speech endpoints (foundation for the future voice pipeline) ──
+export async function brainTts(
+  text: string,
+  opts?: { voice?: string | null; speed?: number | null }
+): Promise<{ base64: string; sampleRate: number }> {
+  const cfg = getBrainConfig()
+  const res = await brainFetch(
+    '/tts',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        voice: opts?.voice ?? null,
+        speed: opts?.speed ?? null,
+        format: 'wav'
+      })
+    },
+    cfg.chatTimeoutMs
+  )
+  if (!res.ok) throw new Error(`Brain Node /tts ${res.status}`)
+  const ab = await res.arrayBuffer()
+  const sampleRate = Number(res.headers.get('X-Sample-Rate')) || 24000
+  return { base64: Buffer.from(ab).toString('base64'), sampleRate }
+}
+
+export async function brainAsr(wavBase64: string): Promise<{ text: string; info?: unknown }> {
+  const cfg = getBrainConfig()
+  const buf = Buffer.from(wavBase64, 'base64')
+
+  // Use the runtime globals (undici) via loose typing so we don't depend on DOM
+  // lib types in the Node tsconfig.
+  const FormDataCtor: any = (globalThis as any).FormData
+  const BlobCtor: any = (globalThis as any).Blob
+  const form = new FormDataCtor()
+  form.append('file', new BlobCtor([buf], { type: 'audio/wav' }), 'audio.wav')
+
+  const res = await brainFetch('/asr', { method: 'POST', body: form }, cfg.chatTimeoutMs)
+  if (!res.ok) throw new Error(`Brain Node /asr ${res.status}`)
+  return await res.json()
+}
+
+// ─── IPC registration ───────────────────────────────────────────────────────
+export default function registerLlmProvider({ ipcMain }: { ipcMain: IpcMain }): void {
+  // Live status for the dashboard / heartbeat tile.
+  ipcMain.handle('brain-health', async () => {
+    const cfg = getBrainConfig()
+    const health = await checkBrainHealth(true)
+    return {
+      enabled: cfg.enabled,
+      baseUrl: cfg.baseUrl,
+      reachable: health.ok,
+      chatReady: health.ok && brainChatReady(health.data),
+      health: health.data
+    }
+  })
+
+  ipcMain.handle('llm-config-get', () => getBrainConfig())
+
+  ipcMain.handle('llm-config-set', (_event, patch: Partial<BrainConfig>) => {
+    return setBrainConfig(patch || {})
+  })
+
+  // Unified chat with automatic fallback — usable by any renderer feature.
+  ipcMain.handle('llm-chat', async (_event, payload: RunChatOptions) => {
+    try {
+      const result = await runChat(payload || ({ messages: [] } as RunChatOptions))
+      return { success: !result.error, ...result }
+    } catch (err) {
+      return { success: false, text: '', emotion: null, backend: 'none', error: String(err) }
+    }
+  })
+
+  ipcMain.handle('brain-tts', async (_event, { text, voice, speed }: any) => {
+    try {
+      const r = await brainTts(String(text || ''), { voice, speed })
+      return { success: true, ...r }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('brain-asr', async (_event, { wavBase64 }: any) => {
+    try {
+      const r = await brainAsr(String(wavBase64 || ''))
+      return { success: true, ...r }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+}

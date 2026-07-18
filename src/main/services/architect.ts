@@ -3,6 +3,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import { spawn } from 'child_process'
 import { GoogleGenAI } from '@google/genai'
+import { resolveGeminiKey } from './llm-provider'
 
 /**
  * BRUTUS Architect Mode
@@ -49,12 +50,14 @@ export default function registerArchitect({ ipcMain }: { ipcMain: IpcMain }) {
   // ─── DRAFT ──────────────────────────────────────────────────────────
   ipcMain.handle('architect-draft', async (_event, { goal, geminiKey }) => {
     try {
-      if (!geminiKey || String(geminiKey).trim() === '') {
+      // Project scaffolding is Gemini-only (never the edge Brain Node).
+      const key = resolveGeminiKey(geminiKey)
+      if (!key) {
         return { success: false, error: 'Missing Gemini API Key.' }
       }
       if (!goal) return { success: false, error: 'No project goal provided.' }
 
-      const ai = new GoogleGenAI({ apiKey: geminiKey })
+      const ai = new GoogleGenAI({ apiKey: key })
       const prompt = `You are a senior software architect. Design a concrete, minimal-but-complete project scaffold for this goal:
 "${goal}"
 
@@ -82,7 +85,10 @@ Rules:
         config: { responseMimeType: 'application/json' }
       })
 
-      let txt = (res.text || '{}').replace(/^```json/i, '').replace(/```$/i, '').trim()
+      let txt = (res.text || '{}')
+        .replace(/^```json/i, '')
+        .replace(/```$/i, '')
+        .trim()
       const plan: ArchitectPlan = JSON.parse(txt)
       await fs.writeFile(planPath, JSON.stringify(plan, null, 2))
 

@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, app } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
 import { GoogleGenAI } from '@google/genai'
+import { resolveGeminiKey } from '../services/llm-provider'
 
 let previewWin: BrowserWindow | null = null
 
@@ -33,13 +34,16 @@ export default function registerWebsiteBuilder() {
       `
       await previewWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(shellHtml)}`)
 
-      if (!geminiKey || geminiKey.trim() === '') {
+      // UI generation is Gemini-only (never the edge Brain Node). Resolve the
+      // key robustly so it works even if the caller didn't pass one.
+      const key = resolveGeminiKey(geminiKey)
+      if (!key) {
         throw new Error(
           'Missing Gemini API Key. Please configure it in the Command Center Vault (Settings Tab).'
         )
       }
 
-      const ai = new GoogleGenAI({ apiKey: geminiKey })
+      const ai = new GoogleGenAI({ apiKey: key })
 
       const sysPrompt = `You are an elite, Awwwards-winning frontend developer and UI/UX designer. 
 Build a highly animated, visually stunning, clean, and premium website based on the user prompt.

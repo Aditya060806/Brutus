@@ -54,6 +54,7 @@ import registerFolderAnalyzer from './logic/folder-analyzer'
 import registerPdfTools from './logic/pdf-tools'
 import registerMediaControls from './logic/media-controls'
 import registerTextChat from './services/text-chat'
+import registerLlmProvider from './services/llm-provider'
 import registerArchitect from './services/architect'
 import registerExcelMaster from './logic/excel-master'
 import registerWebsiteStatus from './logic/website-status'
@@ -66,7 +67,7 @@ import registerPresentation from './services/presentation'
 import registerImageSearch from './logic/image-search'
 import registerDeckStudio from './services/deck-studio'
 import registerKnowledgeGraph from './services/knowledge-graph'
-import { autoUpdater } from 'electron-updater';
+import { autoUpdater } from 'electron-updater'
 
 app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
 
@@ -320,7 +321,14 @@ app.whenReady().then(() => {
   })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    const allowedPermissions = ['media', 'audioCapture', 'videoCapture', 'desktopVideoCapture', 'microphone', 'camera']
+    const allowedPermissions = [
+      'media',
+      'audioCapture',
+      'videoCapture',
+      'desktopVideoCapture',
+      'microphone',
+      'camera'
+    ]
     if (allowedPermissions.includes(permission)) {
       callback(true)
     } else {
@@ -329,7 +337,14 @@ app.whenReady().then(() => {
   })
 
   session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
-    const allowedPermissions = ['media', 'audioCapture', 'videoCapture', 'desktopVideoCapture', 'microphone', 'camera']
+    const allowedPermissions = [
+      'media',
+      'audioCapture',
+      'videoCapture',
+      'desktopVideoCapture',
+      'microphone',
+      'camera'
+    ]
     return allowedPermissions.includes(permission)
   })
 
@@ -343,6 +358,19 @@ app.whenReady().then(() => {
   }
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    // The renderer makes cross-origin API/data calls (weather, stock, HF, Tavily,
+    // map tiles, Gemini WSS…) that need CSP/CORS relaxed. Scope that relaxation to
+    // data/subresource requests only — NOT top-level or nested document loads —
+    // so a page navigated in-app can't have its CSP stripped. Data fetches and the
+    // WebSocket upgrade are unaffected, so no feature or voice-path behaviour changes.
+    const type = details.resourceType
+    const isDocument = type === 'mainFrame' || type === 'subFrame'
+
+    if (isDocument) {
+      callback({ responseHeaders: details.responseHeaders, statusLine: details.statusLine })
+      return
+    }
+
     const responseHeaders = { ...details.responseHeaders }
     delete responseHeaders['content-security-policy']
     delete responseHeaders['x-content-security-policy']
@@ -370,6 +398,7 @@ app.whenReady().then(() => {
   registerFolderAnalyzer(ipcMain)
   registerPdfTools(ipcMain)
   registerMediaControls(ipcMain)
+  registerLlmProvider({ ipcMain })
   registerTextChat({ ipcMain })
   registerArchitect({ ipcMain })
   registerExcelMaster(ipcMain)
