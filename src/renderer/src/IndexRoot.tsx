@@ -18,6 +18,7 @@ import SmartDropZonesWidget from './Widgets/SmartZoneWidget'
 import TitleBar from './components/Titlebar'
 import QRWidget from './Widgets/QRWidget'
 import ChatPanel from './components/ChatPanel'
+import EdgeStatusChip from './components/EdgeStatusChip'
 import DramaticOverlay from './components/DramaticOverlay'
 import DeckStudioWidget from './Widgets/DeckStudioWidget'
 import KnowledgeGraphWidget from './Widgets/KnowledgeGraphWidget'
@@ -65,7 +66,10 @@ const IndexRoot = () => {
 
   useEffect(() => {
     const watchdog = setInterval(() => {
-      if (isSystemActive && !brutusService.isConnected) {
+      // Don't tear the UI down while the service is mid-(re)connect — only when
+      // it's genuinely dead with no recovery in flight.
+      const recovering = brutusService.isConnecting || brutusService.isReconnecting
+      if (isSystemActive && !brutusService.isConnected && !recovering) {
         setIsSystemActive(false)
         setIsMicMuted(true)
         stopVision()
@@ -266,6 +270,7 @@ const IndexRoot = () => {
       </button>
 
       <ChatPanel open={isChatOpen} onClose={() => setIsChatOpen(false)} />
+      <EdgeStatusChip active={isSystemActive} />
       <DramaticOverlay />
       <DeckStudioWidget />
       <KnowledgeGraphWidget />
