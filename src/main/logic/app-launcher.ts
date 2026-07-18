@@ -85,10 +85,23 @@ const PROCESS_NAMES: Record<string, string> = {
   files: 'explorer.exe'
 }
 
+// Reject names carrying shell metacharacters. Legitimate app/process names are
+// alphanumeric with spaces, dots, dashes, plus, colon, underscore or .exe — never
+// quotes, semicolons, pipes, backticks, $() etc. This blocks command injection
+// through the exec() strings below (reachable via the LLM / prompt injection).
+const SHELL_METACHAR = /[`'"$;&|<>(){}\n\r\\*?%!^]/
+function isSafeAppName(name: unknown): name is string {
+  return typeof name === 'string' && name.trim().length > 0 && !SHELL_METACHAR.test(name)
+}
+
 export default function registerAppLauncher(ipcMain: IpcMain) {
   ipcMain.removeHandler('open-app')
   ipcMain.handle('open-app', async (_event, appName: string) => {
     return new Promise((resolve) => {
+      if (!isSafeAppName(appName)) {
+        resolve({ success: false, error: 'Invalid application name.' })
+        return
+      }
       const lowerName = appName.toLowerCase().trim()
       let command = APP_ALIASES[lowerName]
 
@@ -103,6 +116,10 @@ export default function registerAppLauncher(ipcMain: IpcMain) {
   ipcMain.removeHandler('close-app')
   ipcMain.handle('close-app', async (_event, appName: string) => {
     return new Promise((resolve) => {
+      if (!isSafeAppName(appName)) {
+        resolve({ success: false, error: 'Invalid application name.' })
+        return
+      }
       const lowerName = appName.toLowerCase().trim()
       let processName = PROCESS_NAMES[lowerName]
 

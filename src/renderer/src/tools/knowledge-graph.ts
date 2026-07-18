@@ -101,6 +101,51 @@ export const parsePID = async (imagePath: string, graphName?: string): Promise<s
   }. Graph now has ${r.nodes} entities / ${r.edges} relationships.`
 }
 
+/** Import an Obsidian vault (notes + [[wikilinks]] + #tags) into the graph. */
+export const importObsidianVault = async (
+  vaultPath?: string,
+  graphName?: string
+): Promise<string> => {
+  const geminiKey = await getGeminiKey()
+  let vp = (vaultPath || '').trim()
+  let vaultName = ''
+
+  if (!vp) {
+    const list = await window.electron.ipcRenderer.invoke('kg-obsidian-vaults')
+    const vaults = (list?.vaults || []).filter((v: any) => v.exists)
+    if (!vaults.length) {
+      return '⚠️ I couldn’t find an Obsidian vault on this PC. Open Knowledge Graph → Obsidian and browse to your vault folder, or tell me the folder path.'
+    }
+    const chosen = vaults.find((v: any) => v.open) || vaults[0]
+    vp = chosen.path
+    vaultName = chosen.name
+  }
+
+  const gName =
+    graphName ||
+    (vaultName ? vaultName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : 'obsidian')
+
+  window.dispatchEvent(new CustomEvent('kg-start', { detail: { target: vp } }))
+  const r = await window.electron.ipcRenderer.invoke('kg-obsidian-import', {
+    vaultPath: vp,
+    graphName: gName || 'obsidian',
+    geminiKey,
+    options: {
+      includeTags: true,
+      embed: !!geminiKey,
+      includeUnresolved: false,
+      includeAttachments: false,
+      aiEnrich: false
+    }
+  })
+  window.dispatchEvent(new CustomEvent('kg-done', { detail: r }))
+  if (!r?.success) return `❌ Obsidian import failed: ${r?.error}`
+  const qa = r.embedded
+    ? ' You can now ask me questions about your notes.'
+    : ' (Add a Gemini key to enable Q&A over the notes.)'
+  return `✅ Imported ${r.notes} notes from Obsidian into graph "${r.name}" — ${r.links} links, ${r.tags} tags, ${r.nodes} total nodes.${qa}`
+}
+
 /** Export the graph as a Mermaid diagram or JSON (architecture-diagram deliverable). */
 export const exportGraph = async (
   format: 'mermaid' | 'json' = 'mermaid',

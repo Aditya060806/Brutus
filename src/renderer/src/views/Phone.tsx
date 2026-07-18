@@ -189,14 +189,14 @@ const PhoneView = ({ glassPanel }: { glassPanel?: string }) => {
               <button
                 key={i}
                 onClick={() => connectToDevice(dev.ip, dev.port)}
-                className="w-55 h-110 bg-black border-8 border-zinc-900 rounded-[3rem] relative flex flex-col p-2 group hover:border-red-500/50 transition-all duration-500 shadow-2xl hover:shadow-[0_0_40px_rgba(239, 68, 68,0.2)]"
+                className="w-55 h-110 bg-black border-8 border-zinc-900 rounded-[3rem] relative flex flex-col p-2 group hover:border-red-500/50 transition-all duration-500 shadow-2xl hover:shadow-[0_0_40px_rgba(239,68,68,0.2)]"
               >
                 <div className="absolute top-3 left-1/2 -translate-x-1/2 w-20 h-5 bg-zinc-900 rounded-full z-20 group-hover:bg-red-900/50 transition-colors"></div>
                 <div className="flex-1 bg-linear-to-b from-zinc-900 to-black rounded-[2.2rem] overflow-hidden flex flex-col items-center justify-center p-6 relative">
                   <div className="absolute inset-0 bg-red-500/0 group-hover:bg-red-500/10 transition-colors duration-500"></div>
                   <RiSmartphoneLine
                     size={64}
-                    className="text-zinc-700 group-hover:text-red-400 mb-6 transition-colors duration-500 drop-shadow-[0_0_15px_rgba(239, 68, 68,0)] group-hover:drop-shadow-[0_0_15px_rgba(239, 68, 68,0.5)]"
+                    className="text-zinc-700 group-hover:text-red-400 mb-6 transition-colors duration-500 drop-shadow-[0_0_15px_rgba(239,68,68,0)] group-hover:drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]"
                   />
                   <h3 className="text-lg font-black text-white mb-2 tracking-widest text-center uppercase z-10">
                     {dev.model}
@@ -398,7 +398,7 @@ const PhoneView = ({ glassPanel }: { glassPanel?: string }) => {
 
               <div className="flex gap-5">
                 <div className="flex flex-col items-center">
-                  <div className="w-8 h-8 rounded-full bg-red-500 shadow-[0_0_15px_rgba(239, 68, 68,0.5)] flex items-center justify-center text-xs font-bold text-black shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] flex items-center justify-center text-xs font-bold text-black shrink-0">
                     4
                   </div>
                 </div>

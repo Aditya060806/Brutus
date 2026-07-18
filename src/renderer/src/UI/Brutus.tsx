@@ -104,7 +104,7 @@ const Brutus = (props: BrutusProps) => {
               onClick={() => setActiveTab(tab.id)}
               className={`cursor-pointer px-5 py-1.5 text-[10px] font-bold tracking-widest rounded-md transition-all duration-300 flex items-center gap-2 ${
                 activeTab === tab.id
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/20 shadow-[0_0_15px_rgba(239, 68, 68,0.1)]'
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.1)]'
                   : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
               }`}
             >

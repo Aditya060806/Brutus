@@ -150,12 +150,19 @@ const NotesView = ({ glassPanel }: { glassPanel?: string }) => {
                   setIsEditorOpen(false)
                   setSelectedNote(note)
                 }}
-                className={`group p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                className={`group relative overflow-hidden p-3 rounded-xl border transition-all duration-300 cursor-pointer flex items-center justify-between hover:-translate-y-0.5 ${
                   selectedNote?.filename === note.filename && !isEditorOpen
-                    ? 'bg-red-500/10 border-red-500/30 shadow-[0_0_15px_rgba(239, 68, 68,0.1)]'
-                    : 'bg-zinc-900/40 border-white/5 hover:bg-white/5 hover:border-white/10'
+                    ? 'bg-red-500/10 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]'
+                    : 'bg-zinc-900/40 border-white/5 hover:bg-white/5 hover:border-white/10 hover:shadow-[0_6px_18px_rgba(239,68,68,0.08)]'
                 }`}
               >
+                <span
+                  className={`absolute left-0 top-0 h-full w-0.5 bg-red-500 transition-transform duration-300 origin-top ${
+                    selectedNote?.filename === note.filename && !isEditorOpen
+                      ? 'scale-y-100'
+                      : 'scale-y-0 group-hover:scale-y-100'
+                  }`}
+                />
                 <div className="overflow-hidden">
                   <h3
                     className={`text-xs font-bold truncate ${selectedNote?.filename === note.filename && !isEditorOpen ? 'text-red-100' : 'text-zinc-200'}`}
@@ -250,11 +257,20 @@ const NotesView = ({ glassPanel }: { glassPanel?: string }) => {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-zinc-200 gap-4">
-            <RiFileTextLine size={48} className="opacity-20" />
+          <div className="flex-1 flex flex-col items-center justify-center text-zinc-200 gap-5 animate-in fade-in duration-500">
+            <div className="relative">
+              <div className="absolute inset-0 rounded-full bg-red-500/10 blur-2xl scale-150 animate-pulse" />
+              <RiFileTextLine size={48} className="relative opacity-30" />
+            </div>
             <span className="text-xs tracking-widest opacity-50">
               SELECT A DATA NODE OR CREATE NEW
             </span>
+            <button
+              onClick={startCreating}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] font-bold tracking-widest hover:bg-red-500/20 hover:border-red-500/40 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(239,68,68,0.15)] transition-all duration-300"
+            >
+              <RiAddLine size={14} /> NEW NOTE
+            </button>
           </div>
         )}
       </div>

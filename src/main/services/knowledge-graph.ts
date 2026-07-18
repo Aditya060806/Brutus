@@ -536,6 +536,211 @@ async function discoverDocs(target: string): Promise<string[]> {
   return out
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// OBSIDIAN INTEGRATION — deterministic vault → knowledge-graph importer
+// ----------------------------------------------------------------------
+// Obsidian already encodes an explicit knowledge graph: notes are nodes and
+// [[wikilinks]] / #tags / ![[embeds]] / frontmatter are edges & metadata. We
+// build that graph DIRECTLY (offline, free, exact) instead of paying the LLM to
+// re-derive it, then optionally embed note text for GraphRAG Q&A and optionally
+// layer AI entity extraction on top.
+// ══════════════════════════════════════════════════════════════════════
+
+// Obsidian-oriented node/edge vocabulary (kept distinct from the industrial
+// ontology so the two import paths don't pollute each other).
+const OBS_NODE_TYPES = ['Note', 'Topic', 'Concept', 'Person', 'Place', 'Attachment']
+const OBS_EDGE_TYPES = ['LINKS_TO', 'EMBEDS', 'TAGGED_WITH', 'ALIAS_OF', 'MENTIONS']
+
+interface ParsedNote {
+  key: string
+  title: string
+  relPath: string
+  absPath: string
+  body: string
+  fm: Record<string, unknown>
+  tags: string[]
+  aliases: string[]
+  links: { target: string; display?: string; embed: boolean; attachment: boolean }[]
+  mtime: number
+}
+
+const stripQuotes = (s: string): string => s.replace(/^['"]|['"]$/g, '').trim()
+
+const toStrArray = (v: unknown): string[] => {
+  if (v == null) return []
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean)
+  return String(v)
+    .split(',')
+    .map((x) => stripQuotes(x.trim()))
+    .filter(Boolean)
+}
+
+// Minimal, dependency-free YAML frontmatter parser — covers the shapes Obsidian
+// actually emits: `key: value`, inline `key: [a, b]`, and block lists (`- item`).
+function parseFrontmatter(md: string): { data: Record<string, unknown>; body: string } {
+  if (!md.startsWith('---')) return { data: {}, body: md }
+  const end = md.indexOf('\n---', 3)
+  if (end === -1) return { data: {}, body: md }
+  const raw = md.slice(md.indexOf('\n') + 1, end)
+  const body = md.slice(end + 4).replace(/^\r?\n/, '')
+  const data: Record<string, unknown> = {}
+  let curKey: string | null = null
+  for (const line of raw.split(/\r?\n/)) {
+    const item = /^\s*-\s+(.*)$/.exec(line)
+    if (item && curKey) {
+      ;(data[curKey] as string[]).push(stripQuotes(item[1].trim()))
+      continue
+    }
+    const kv = /^([A-Za-z0-9_][A-Za-z0-9_\- ]*):\s*(.*)$/.exec(line)
+    if (!kv) continue
+    const key = kv[1].trim()
+    const val = kv[2].trim()
+    curKey = null
+    if (val === '') {
+      data[key] = []
+      curKey = key
+    } else if (val.startsWith('[') && val.endsWith(']')) {
+      data[key] = val.slice(1, -1).split(',').map((s) => stripQuotes(s.trim())).filter(Boolean)
+    } else {
+      data[key] = stripQuotes(val)
+    }
+  }
+  return { data, body }
+}
+
+const ATTACH_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|pdf|mp4|mov|mp3|wav|webm|excalidraw)$/i
+
+// Parse [[wikilinks]], [[a|b]], [[a#h]], ![[embeds]], ![[img.png]]
+function parseWikilinks(body: string): ParsedNote['links'] {
+  const out: ParsedNote['links'] = []
+  const re = /(!?)\[\[([^\]]+?)\]\]/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(body))) {
+    const embed = m[1] === '!'
+    let inner = m[2]
+    let display: string | undefined
+    const pipe = inner.indexOf('|')
+    if (pipe !== -1) {
+      display = inner.slice(pipe + 1).trim()
+      inner = inner.slice(0, pipe)
+    }
+    // drop #heading / #^block anchors
+    const target = inner.split('#')[0].split('^')[0].trim()
+    if (!target) continue // same-note anchor link
+    out.push({ target, display, embed, attachment: embed && ATTACH_EXT.test(target) })
+  }
+  return out
+}
+
+// Inline #tags — ignore code spans/fences and require at least one letter.
+function parseInlineTags(body: string): string[] {
+  const clean = body.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ')
+  const out = new Set<string>()
+  const re = /(?:^|\s)#([A-Za-z0-9_][A-Za-z0-9_\-/]*)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(clean))) {
+    const tag = m[1]
+    if (/[A-Za-z_]/.test(tag)) out.add(tag)
+  }
+  return [...out]
+}
+
+async function walkVault(root: string): Promise<string[]> {
+  const out: string[] = []
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > 12) return
+    let entries: any[]
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue // .obsidian, .trash, .git
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) await walk(full, depth + 1)
+      else if (path.extname(e.name).toLowerCase() === '.md') out.push(full)
+    }
+  }
+  await walk(root, 0)
+  return out
+}
+
+function obsidianConfigPath(): string {
+  if (process.platform === 'darwin') {
+    return path.join(app.getPath('home'), 'Library', 'Application Support', 'obsidian', 'obsidian.json')
+  }
+  if (process.platform === 'win32') {
+    return path.join(app.getPath('appData'), 'obsidian', 'obsidian.json')
+  }
+  return path.join(app.getPath('home'), '.config', 'obsidian', 'obsidian.json')
+}
+
+async function discoverObsidianVaults(): Promise<any[]> {
+  try {
+    const cfg = await fs.readFile(obsidianConfigPath(), 'utf-8')
+    const parsed = JSON.parse(cfg)
+    const vaults = parsed?.vaults || {}
+    const out: any[] = []
+    for (const [id, v] of Object.entries<any>(vaults)) {
+      const vpath = v?.path
+      if (!vpath) continue
+      let exists = false
+      let noteCount = 0
+      try {
+        const st = await fs.stat(vpath)
+        exists = st.isDirectory()
+        if (exists) noteCount = (await walkVault(vpath)).length
+      } catch {
+        exists = false
+      }
+      out.push({ id, name: path.basename(vpath), path: vpath, exists, open: !!v?.open, noteCount })
+    }
+    // most-recently-opened first
+    return out.sort((a, b) => Number(b.open) - Number(a.open))
+  } catch {
+    return []
+  }
+}
+
+// node helpers that preserve the Obsidian type vocabulary (bypass canonicalType)
+function ensureTypedNode(
+  g: KnowledgeGraph,
+  type: string,
+  name: string,
+  docId?: string,
+  aliases: string[] = [],
+  props: Record<string, string> = {}
+): string {
+  const key = nodeKey(type, name)
+  if (!g.nodes[key]) {
+    g.nodes[key] = { id: key, type, name, aliases: [], props: {}, docs: [], mentions: 0 }
+  }
+  const n = g.nodes[key]
+  n.mentions++
+  if (docId && !n.docs.includes(docId)) n.docs.push(docId)
+  for (const a of aliases) if (a && a !== name && !n.aliases.includes(a)) n.aliases.push(a)
+  for (const [k, v] of Object.entries(props)) if (v && !n.props[k]) n.props[k] = String(v)
+  return key
+}
+
+function addTypedEdge(
+  g: KnowledgeGraph,
+  seen: Set<string>,
+  s: string,
+  t: string,
+  type: string,
+  label: string,
+  docId: string
+): boolean {
+  if (!s || !t || s === t) return false
+  const sig = `${s}|${type}|${t}`
+  if (seen.has(sig)) return false
+  seen.add(sig)
+  g.edges.push({ id: crypto.randomUUID(), source: s, target: t, type, label: label || type, docId, confidence: 1 })
+  return true
+}
+
 // ─── registration ─────────────────────────────────────────────────────
 export default function registerKnowledgeGraph({ ipcMain }: { ipcMain: IpcMain }): void {
   const handle = (channel: string, fn: (event: any, params: any) => Promise<any>): void => {
@@ -857,6 +1062,190 @@ NEVER invent tags you cannot see. Output ONLY JSON: {"entities":[{"name","type",
       if (res.canceled || !res.filePaths[0]) return { success: false, canceled: true }
       return { success: true, path: res.filePaths[0] }
     } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ── OBSIDIAN: discover vaults registered on this machine ────────────
+  handle('kg-obsidian-vaults', async () => {
+    try {
+      const vaults = await discoverObsidianVaults()
+      return { success: true, vaults, configFound: vaults.length > 0 }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ── OBSIDIAN: import a vault into the knowledge graph ────────────────
+  handle('kg-obsidian-import', async (event, params) => {
+    const send = (p: object): void => {
+      try { event.sender.send('kg-progress', p) } catch { /* ignore */ }
+    }
+    try {
+      const { vaultPath, graphName, geminiKey, options } = params || {}
+      const opts = {
+        includeTags: true,
+        includeUnresolved: false,
+        includeAttachments: false,
+        embed: true,
+        aiEnrich: false,
+        maxFiles: 2000,
+        ...(options || {})
+      }
+
+      if (!vaultPath || !String(vaultPath).trim()) {
+        return { success: false, error: 'No Obsidian vault selected.' }
+      }
+      const root = path.resolve(String(vaultPath))
+      try {
+        const st = await fs.stat(root)
+        if (!st.isDirectory()) return { success: false, error: 'Vault path is not a folder.' }
+      } catch {
+        return { success: false, error: `Vault not found: ${root}` }
+      }
+
+      // Embedding / AI enrichment need a Gemini key; without one we still build
+      // the full structural graph (links + tags) — Q&A just won't be available.
+      let keyMissing = false
+      if ((opts.embed || opts.aiEnrich) && !String(geminiKey || '').trim()) {
+        opts.embed = false
+        opts.aiEnrich = false
+        keyMissing = true
+      }
+      const ai = opts.embed || opts.aiEnrich ? new GoogleGenAI({ apiKey: geminiKey }) : null
+      const g = await loadGraph(graphName || 'obsidian')
+
+      send({ stage: 'scanning', message: 'Scanning vault…' })
+      let files = await walkVault(root)
+      files = files.slice(0, Math.max(1, Math.min(Number(opts.maxFiles) || 2000, 5000)))
+      if (!files.length) return { success: false, error: 'No markdown notes found in this vault.' }
+      send({ stage: 'scanning', message: `Found ${files.length} note(s).`, total: files.length })
+
+      // PASS 1 — parse + index every note so [[wikilinks]] resolve to real nodes
+      const notes: ParsedNote[] = []
+      const index = new Map<string, string>() // basename / relpath / alias (lower) → note key
+      for (const abs of files) {
+        let content = ''
+        try { content = await fs.readFile(abs, 'utf-8') } catch { continue }
+        const { data, body } = parseFrontmatter(content)
+        const relPath = path.relative(root, abs).replace(/\\/g, '/')
+        const base = path.basename(abs, '.md')
+        const title = typeof data.title === 'string' && data.title.trim() ? data.title.trim() : base
+        const aliases = toStrArray(data.aliases)
+        const fmTags = toStrArray(data.tags)
+        const tags = opts.includeTags ? [...new Set([...fmTags, ...parseInlineTags(body)])] : []
+        const links = parseWikilinks(body)
+        let mtime = 0
+        try { mtime = (await fs.stat(abs)).mtimeMs } catch { /* ignore */ }
+        const key = nodeKey('Note', title)
+        notes.push({ key, title, relPath, absPath: abs, body, fm: data, tags, aliases, links, mtime })
+        index.set(base.toLowerCase(), key)
+        index.set(relPath.toLowerCase(), key)
+        index.set(relPath.replace(/\.md$/i, '').toLowerCase(), key)
+        for (const a of aliases) index.set(a.toLowerCase(), key)
+      }
+
+      const seen = new Set(g.edges.map((e) => `${e.source}|${e.type}|${e.target}`))
+      let linkCount = 0
+      let tagCount = 0
+      let embedCount = 0
+
+      // PASS 2 — nodes + relationships (deterministic, offline)
+      let processed = 0
+      for (const note of notes) {
+        const docId = crypto.randomUUID()
+        const props: Record<string, string> = {
+          path: note.relPath,
+          words: String(note.body.split(/\s+/).filter(Boolean).length)
+        }
+        if (note.mtime) props.modified = new Date(note.mtime).toISOString().slice(0, 10)
+        for (const [k, v] of Object.entries(note.fm)) {
+          if (['title', 'aliases', 'tags'].includes(k)) continue
+          const s = Array.isArray(v) ? v.join(', ') : String(v)
+          if (s) props[k.slice(0, 24)] = s.slice(0, 120)
+        }
+        const noteId = ensureTypedNode(g, 'Note', note.title, docId, note.aliases, props)
+        if (!g.documents.find((d) => d.path === note.absPath)) {
+          g.documents.push({ id: docId, path: note.absPath, name: note.title, type: 'md', ingestedAt: Date.now(), chunkCount: 0 })
+        }
+
+        for (const tag of note.tags) {
+          const tid = ensureTypedNode(g, 'Topic', tag, docId)
+          if (addTypedEdge(g, seen, noteId, tid, 'TAGGED_WITH', `#${tag}`, docId)) tagCount++
+        }
+
+        send({ stage: 'linking', message: `Linking ${note.title}…`, processed, total: notes.length, nodes: Object.keys(g.nodes).length, edges: g.edges.length })
+        for (const l of note.links) {
+          const lk = l.target.toLowerCase()
+          let targetId = index.get(lk) || index.get(lk.replace(/\.md$/i, ''))
+          if (!targetId) {
+            if (l.attachment) {
+              if (!opts.includeAttachments) continue
+              targetId = ensureTypedNode(g, 'Attachment', path.basename(l.target), docId)
+            } else if (opts.includeUnresolved) {
+              targetId = ensureTypedNode(g, 'Note', l.target, docId, [], { unresolved: 'true' })
+            } else continue
+          }
+          const etype = l.embed ? 'EMBEDS' : 'LINKS_TO'
+          if (addTypedEdge(g, seen, noteId, targetId, etype, l.display || l.target, docId)) linkCount++
+        }
+        processed++
+      }
+      await saveGraph(g)
+
+      // PASS 3 — optional embeddings for GraphRAG Q&A (batched, capped)
+      if (ai && opts.embed) {
+        let ei = 0
+        for (const note of notes) {
+          const doc = g.documents.find((d) => d.path === note.absPath)
+          if (!doc) continue
+          const chunks = chunkText(note.body).slice(0, 6)
+          if (!chunks.length) { ei++; continue }
+          try {
+            send({ stage: 'embedding', message: `Embedding ${note.title}…`, processed: ei, total: notes.length })
+            const embs = await embedBatch(ai, chunks.map((c) => `${note.title}\n${c}`))
+            embs.forEach((emb, i) => {
+              if (emb) { g.chunks.push({ id: crypto.randomUUID(), docId: doc.id, text: chunks[i], embedding: emb }); embedCount++ }
+            })
+            doc.chunkCount = chunks.length
+            await sleep(400)
+          } catch { await sleep(1200) }
+          ei++
+          if (ei % 10 === 0) await saveGraph(g)
+        }
+        await saveGraph(g)
+      }
+
+      // PASS 4 — optional AI entity enrichment (experimental; industrial extractor)
+      if (ai && opts.aiEnrich) {
+        let idx = 0
+        for (const note of notes.slice(0, 40)) {
+          const doc = g.documents.find((d) => d.path === note.absPath)
+          if (!doc) continue
+          try {
+            send({ stage: 'enriching', message: `Enriching ${note.title}…`, processed: idx, total: Math.min(notes.length, 40), nodes: Object.keys(g.nodes).length, edges: g.edges.length })
+            const { entities, relationships } = await extractGraph(ai, note.body.slice(0, 12000))
+            mergeIntoGraph(g, doc.id, entities, relationships)
+            await sleep(1200)
+          } catch { await sleep(2500) }
+          idx++
+        }
+        await saveGraph(g)
+      }
+
+      send({ stage: 'done', message: `Imported ${notes.length} notes · ${linkCount} links · ${tagCount} tags.` })
+      return {
+        success: true,
+        notes: notes.length,
+        links: linkCount,
+        tags: tagCount,
+        embedded: embedCount,
+        keyMissing,
+        ...statsOf(g),
+        viz: vizPayload(g)
+      }
+    } catch (err) {
+      send({ stage: 'error', message: String(err) })
       return { success: false, error: String(err) }
     }
   })

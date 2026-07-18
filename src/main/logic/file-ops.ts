@@ -1,7 +1,26 @@
-import { IpcMain } from 'electron'
+import { IpcMain, app } from 'electron'
 import fs from 'fs/promises'
+import path from 'path'
 
 export default function registerFileOps(ipcMain: IpcMain) {
+  // Create a folder. Relative names land on the Desktop (matches write-file behaviour).
+  ipcMain.handle('create-directory', async (_event, folderPath: string) => {
+    try {
+      if (!folderPath || typeof folderPath !== 'string') {
+        return { success: false, error: 'A folder path is required.' }
+      }
+      const isAbsolutePath = folderPath.includes('/') || folderPath.includes('\\')
+      const targetPath = isAbsolutePath
+        ? path.normalize(folderPath)
+        : path.join(app.getPath('desktop'), folderPath)
+
+      await fs.mkdir(targetPath, { recursive: true })
+      return { success: true, path: targetPath }
+    } catch (err) {
+      return { success: false, error: `${err}` }
+    }
+  })
+
   ipcMain.handle('file-ops', async (_event, { operation, sourcePath, destPath }) => {
 
     try {

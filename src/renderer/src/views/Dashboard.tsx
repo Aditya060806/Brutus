@@ -272,7 +272,7 @@ export default function DashboardView({
       shadowClass: 'shadow-[0_0_8px_#10b981]',
       bgGradient: 'from-emerald-950/30 to-black/60',
       pattern:
-        'bg-[linear-linear(to_right,#10b98108_1px,transparent_1px),linear-linear(to_bottom,#10b98108_1px,transparent_1px)] bg-[size:12px_12px]'
+        'bg-[linear-gradient(to_right,#10b98114_1px,transparent_1px),linear-gradient(to_bottom,#10b98114_1px,transparent_1px)] bg-[size:12px_12px]'
     },
     {
       icon: <FaMemory />,
@@ -285,7 +285,7 @@ export default function DashboardView({
       glowClass: 'via-cyan-500/50',
       shadowClass: 'shadow-[0_0_8px_#06b6d4]',
       bgGradient: 'from-cyan-950/30 to-black/60',
-      pattern: 'bg-[radial-linear(#06b6d415_1px,transparent_1px)] bg-[size:10px_10px]'
+      pattern: 'bg-[radial-gradient(#06b6d422_1px,transparent_1px)] bg-[size:10px_10px]'
     },
     {
       icon: <GiTinker />,
@@ -299,7 +299,7 @@ export default function DashboardView({
       shadowClass: 'shadow-[0_0_8px_#f97316]',
       bgGradient: 'from-orange-950/30 to-black/60',
       pattern:
-        'bg-[radial-linear(ellipse_at_top_right,_var(--tw-linear-stops))] from-orange-900/20 via-transparent to-transparent'
+        'bg-[radial-gradient(ellipse_at_top_right,#f9731628,transparent_70%)]'
     },
     {
       icon: <HiComputerDesktop />,
@@ -313,7 +313,7 @@ export default function DashboardView({
       shadowClass: '',
       bgGradient: 'from-purple-950/30 to-black/60',
       pattern:
-        'bg-[linear-linear(45deg,#a855f708_25%,transparent_25%,transparent_50%,#a855f708_50%,#a855f708_75%,transparent_75%,transparent)] bg-[size:24px_24px]',
+        'bg-[linear-gradient(45deg,#a855f714_25%,transparent_25%,transparent_50%,#a855f714_50%,#a855f714_75%,transparent_75%,transparent)] bg-[size:24px_24px]',
       hideBar: true
     }
   ]
@@ -481,11 +481,14 @@ export default function DashboardView({
                   </span>
                   {/* Dynamic Hardware Bar */}
                   {!m.hideBar && (
-                    <div className="w-full h-1 bg-black/40 rounded-full overflow-hidden backdrop-blur-sm border border-white/5">
+                    <div className="relative w-full h-1 bg-black/40 rounded-full overflow-hidden backdrop-blur-sm border border-white/5">
                       <div
                         className={`h-full ${m.bgClass} ${m.shadowClass} transition-all duration-700 ease-out`}
                         style={{ width: isSystemActive ? `${m.raw}%` : '0%' }}
                       />
+                      {isSystemActive && m.raw > 0 && (
+                        <div className="absolute inset-y-0 left-0 w-1/3 bg-linear-to-r from-transparent via-white/50 to-transparent brutus-bar-sheen" />
+                      )}
                     </div>
                   )}
                 </div>
@@ -508,8 +511,12 @@ export default function DashboardView({
           />
         </div>
 
+        {isSystemActive && (
+          <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[44vh] h-[44vh] rounded-full blur-2xl opacity-60 z-0 brutus-aura" />
+        )}
+
         <div
-          className={`w-[60vh] h-[60vh] max-w-full transition-all duration-1000 ${isSystemActive ? 'opacity-100 scale-100' : 'opacity-85 scale-90 grayscale'}`}
+          className={`relative z-10 w-[60vh] h-[60vh] max-w-full transition-all duration-1000 ${isSystemActive ? 'opacity-100 scale-100' : 'opacity-85 scale-90 grayscale'}`}
           style={{
             filter: isSystemActive ? 'drop-shadow(0 0 18px rgba(180,60,60,0.18))' : 'none',
             transition: 'filter 1.5s ease'
@@ -529,8 +536,17 @@ export default function DashboardView({
               {isVideoOn ? <RiSwapBoxLine size={20} /> : <RiCameraLine size={20} />}
             </button>
             <button onClick={toggleSystem} className="relative group mx-2">
+              {isSystemActive && (
+                <>
+                  <span className="pointer-events-none absolute inset-0 rounded-full border border-red-400/60 brutus-ring" />
+                  <span
+                    className="pointer-events-none absolute inset-0 rounded-full border border-red-400/40 brutus-ring"
+                    style={{ animationDelay: '1.2s' }}
+                  />
+                </>
+              )}
               <div
-                className={`cursor-pointer p-4 rounded-full border-2 transition-all duration-500 ${isSystemActive ? 'bg-red-500 border-red-400 text-black shadow-[0_0_20px_#ef4444]' : 'bg-red-500/10 border-red-500/50 text-red-500'}`}
+                className={`relative cursor-pointer p-4 rounded-full border-2 transition-all duration-500 ${isSystemActive ? 'bg-red-500 border-red-400 text-black shadow-[0_0_20px_#ef4444]' : 'bg-red-500/10 border-red-500/50 text-red-500 group-hover:bg-red-500/20 group-hover:scale-105'}`}
               >
                 <RiPhoneFill size={24} className={isSystemActive ? 'animate-pulse' : ''} />
               </div>
