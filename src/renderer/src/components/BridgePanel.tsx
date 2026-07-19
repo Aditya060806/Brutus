@@ -20,6 +20,7 @@ import {
   type BridgeStatus,
   type BridgeDevice
 } from '@renderer/services/bridge-client'
+import { duetController } from '@renderer/services/duet-controller'
 
 const card = 'bg-[#0A0A0A] border border-white/10 rounded-xl p-4 flex flex-col gap-3'
 const title =
@@ -34,6 +35,7 @@ const BridgePanel = () => {
   const [status, setStatus] = useState<BridgeStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [duetActive, setDuetActive] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -51,7 +53,14 @@ const BridgePanel = () => {
       else if (e.type === 'devices')
         setStatus((prev) => (prev ? { ...prev, devices: e.payload.devices } : prev))
     })
-    return off
+    const offDuet = duetController.subscribe((e) => {
+      if (e.kind === 'start') setDuetActive(true)
+      else if (e.kind === 'stop') setDuetActive(false)
+    })
+    return () => {
+      off()
+      offDuet()
+    }
   }, [refresh])
 
   const toggleEnabled = async (): Promise<void> => {
@@ -202,6 +211,19 @@ const BridgePanel = () => {
           }`}
         >
           {running ? 'STOP BRIDGE' : 'START BRIDGE'}
+        </button>
+
+        <button
+          onClick={() => (duetActive ? duetController.stop() : duetController.start())}
+          disabled={!running}
+          title="Have PC-Brutus and Robo-Brutus talk to each other"
+          className={`cursor-pointer px-4 h-10 flex items-center justify-center gap-2 text-[12px] font-bold rounded-lg transition-all tracking-widest border disabled:opacity-40 disabled:cursor-not-allowed ${
+            duetActive
+              ? 'bg-red-500/20 border-red-500/50 text-red-200 animate-pulse'
+              : 'bg-gradient-to-r from-cyan-500/20 to-red-500/20 border-white/20 text-white hover:border-white/40'
+          }`}
+        >
+          {duetActive ? 'STOP DUET' : '✦ DUET'}
         </button>
 
         <ToggleChip

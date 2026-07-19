@@ -39,6 +39,7 @@ const INVOKE_CHANNELS: ReadonlySet<string> = new Set([
   'brain-tts',
   'bridge-publish-state',
   'bridge-regenerate-code',
+  'bridge-send',
   'bridge-set-config',
   'bridge-start',
   'bridge-status',

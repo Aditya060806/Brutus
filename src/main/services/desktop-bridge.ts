@@ -670,6 +670,15 @@ export default function registerDesktopBridge({
     return { ok: true }
   })
 
+  // Broadcast an arbitrary envelope (e.g. Duet Mode 'command' messages) to every
+  // paired phone. Used by the renderer duet orchestrator.
+  ipcMain.handle('bridge-send', (_e, payload: { type?: string; data?: unknown }) => {
+    if (!running || !payload || typeof payload.type !== 'string') return { ok: false }
+    const t = payload.type as (typeof MSG)[keyof typeof MSG]
+    broadcast(makeEnvelope(t, config.serverId, payload.data ?? {}))
+    return { ok: true }
+  })
+
   // Auto-start on boot unless the user disabled it.
   if (config.enabled) {
     setTimeout(() => startBridge(), 1200)

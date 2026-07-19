@@ -20,6 +20,8 @@ import QRWidget from './Widgets/QRWidget'
 import ChatPanel from './components/ChatPanel'
 import EdgeStatusChip from './components/EdgeStatusChip'
 import DramaticOverlay from './components/DramaticOverlay'
+import DuetOverlay from './components/DuetOverlay'
+import { duetController } from './services/duet-controller'
 import DeckStudioWidget from './Widgets/DeckStudioWidget'
 import KnowledgeGraphWidget from './Widgets/KnowledgeGraphWidget'
 import { RiChat3Line, RiMicLine, RiSlideshow3Line, RiNodeTree } from 'react-icons/ri'
@@ -42,6 +44,8 @@ const IndexRoot = () => {
 
   useEffect(() => {
     window.electron.ipcRenderer.on('overlay-mode', (_e, mode) => setIsOverlay(mode))
+    // Listen for Duet Mode commands from a paired phone (works app-wide).
+    duetController.init()
     return () => {
       window.electron.ipcRenderer.removeAllListeners('overlay-mode')
     }
@@ -272,6 +276,7 @@ const IndexRoot = () => {
       <ChatPanel open={isChatOpen} onClose={() => setIsChatOpen(false)} />
       <EdgeStatusChip active={isSystemActive} />
       <DramaticOverlay />
+      <DuetOverlay />
       <DeckStudioWidget />
       <KnowledgeGraphWidget />
     </div>

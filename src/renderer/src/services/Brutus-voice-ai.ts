@@ -7,6 +7,7 @@ import {
 } from '../utils/audioUtils'
 import { getRunningApps } from './get-apps'
 import { getHistory, retrieveCoreMemory, saveCoreMemory, saveMessage } from './brutus-ai-brain'
+import { duetController } from './duet-controller'
 import { getAllApps, getSystemStatus } from './system-info'
 import { handleImageGeneration } from '@renderer/tools/Image-generator'
 import { fetchWeather } from '@renderer/tools/weather-api'
@@ -3596,6 +3597,8 @@ ${JSON.stringify(history)}
                 const userText = this.userInputBuffer.trim()
                 await saveMessage('user', userText)
                 analyzeAndReact(userText, 'user')
+                // Hands-free Duet trigger ("talk to each other" / "duet" / "stop the duet").
+                duetController.handleUtterance(userText)
                 this.userInputBuffer = ''
               }
 
