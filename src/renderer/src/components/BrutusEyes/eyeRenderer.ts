@@ -161,6 +161,28 @@ export function drawEye(
   irisRotation: number,
   isLeft: boolean = true
 ) {
+  // Guard: a hidden/zero-sized canvas or an unsettled animation value can make
+  // these inputs NaN/Infinity, which makes createRadialGradient throw and kills
+  // the whole eye animation loop. Sanitise, and skip the frame if unrecoverable.
+  if (
+    !Number.isFinite(cx) ||
+    !Number.isFinite(cy) ||
+    !Number.isFinite(baseW) ||
+    !Number.isFinite(baseH) ||
+    baseW <= 0 ||
+    baseH <= 0
+  ) {
+    return
+  }
+  outputVol = Number.isFinite(outputVol) ? outputVol : 0
+  micVol = Number.isFinite(micVol) ? micVol : 0
+  pupilX = Number.isFinite(pupilX) ? pupilX : 0
+  pupilY = Number.isFinite(pupilY) ? pupilY : 0
+  shakeX = Number.isFinite(shakeX) ? shakeX : 0
+  heartT = Number.isFinite(heartT) ? heartT : 0
+  irisRotation = Number.isFinite(irisRotation) ? irisRotation : 0
+  blinkT = Number.isFinite(blinkT) ? blinkT : 0
+
   const w = baseW * shapePair.widthScale
   const h = baseH * shapePair.heightScale
   const r = Math.min(w, h) * shapePair.roundness
