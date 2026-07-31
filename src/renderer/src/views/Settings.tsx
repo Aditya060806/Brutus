@@ -55,7 +55,7 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
   // ─── Brain Node (edge inference routing) ────────────────────────────
   const [brainUrl, setBrainUrl] = useState('http://10.113.246.106:8080')
   const [brainKey, setBrainKey] = useState('')
-  const [brainEnabled, setBrainEnabled] = useState(true)
+  const [brainEnabled, setBrainEnabled] = useState(false)
   const [brainBusy, setBrainBusy] = useState(false)
   const [brainChecking, setBrainChecking] = useState(false)
   const [brainHealth, setBrainHealth] = useState<{
@@ -1027,17 +1027,22 @@ const SettingsView = ({ isSystemActive }: SettingsProps) => {
                       <span className="text-[10px] text-amber-400 font-mono tracking-widest flex items-center gap-1 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
                         <RiErrorWarningLine /> REACHABLE • LLM LOADING
                       </span>
-                    ) : (
+                    ) : brainEnabled ? (
                       <span className="text-[10px] text-red-400 font-mono tracking-widest flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">
-                        <RiErrorWarningLine /> OFFLINE • GEMINI FALLBACK
+                        <RiErrorWarningLine /> OFFLINE • NO FALLBACK
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-zinc-400 font-mono tracking-widest flex items-center gap-1 bg-white/5 px-2 py-1 rounded border border-white/10">
+                        <RiErrorWarningLine /> OFFLINE • USING GEMINI
                       </span>
                     )}
                   </div>
 
                   <p className="text-xs text-zinc-500 -mt-1 leading-relaxed">
-                    All AI reasoning runs on the Snapdragon Brain Node over the network. If it is
-                    unreachable, Brutus automatically falls back to Gemini. UI generation always
-                    uses Gemini.
+                    While &quot;Route AI to Brain Node&quot; is ON, every chat request is served by
+                    the edge NPU ONLY — Brutus does NOT silently fall back to Gemini if the node is
+                    unreachable. Turn the toggle off below to send chat straight to Gemini. UI
+                    generation always uses Gemini regardless of this setting.
                   </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

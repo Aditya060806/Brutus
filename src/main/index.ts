@@ -56,6 +56,8 @@ import registerMediaControls from './logic/media-controls'
 import registerTextChat from './services/text-chat'
 import registerLlmProvider from './services/llm-provider'
 import registerDesktopBridge from './services/desktop-bridge'
+import registerRobotV2 from './services/robot-v2'
+import registerRobotAudio from './services/robot-audio'
 import registerArchitect from './services/architect'
 import registerExcelMaster from './logic/excel-master'
 import registerWebsiteStatus from './logic/website-status'
@@ -89,6 +91,9 @@ const OAUTH_PROTOCOL_PREFIX = 'brutus://'
 
 let mainWindow: BrowserWindow | null = null
 let isOverlayMode = false
+// Pending Web Bluetooth chooser callback for the robot's HM-10 module (see the
+// select-bluetooth-device hook in createWindow + the robot-ble-select handler).
+let bleSelectCallback: ((deviceId: string) => void) | null = null
 // Stores callback URLs that can arrive before renderer listeners are mounted.
 let pendingOAuthCallbackUrl: string | null = null
 
@@ -123,6 +128,20 @@ function createWindow(): void {
       backgroundThrottling: false,
       webSecurity: false
     }
+  })
+
+  // Electron renders no picker for Web Bluetooth. While the Robot view has a
+  // navigator.bluetooth.requestDevice() call pending, Chromium re-fires this
+  // event as scan results accumulate; we stream the list to the renderer's own
+  // picker UI and resolve the request via the 'robot-ble-select' IPC call
+  // (deviceId to choose, '' to cancel).
+  mainWindow.webContents.on('select-bluetooth-device', (event, deviceList, callback) => {
+    event.preventDefault()
+    bleSelectCallback = callback
+    mainWindow?.webContents.send(
+      'robot-ble-devices',
+      deviceList.map((d) => ({ deviceId: d.deviceId, deviceName: d.deviceName || 'Unknown' }))
+    )
   })
 
   mainWindow.on('ready-to-show', () => {
@@ -401,6 +420,18 @@ app.whenReady().then(() => {
   registerMediaControls(ipcMain)
   registerLlmProvider({ ipcMain })
   registerDesktopBridge({ ipcMain, getWindow: () => mainWindow })
+  registerRobotV2({ ipcMain, getWindow: () => mainWindow })
+  registerRobotAudio({ ipcMain, getWindow: () => mainWindow })
+  // Resolves the pending Web Bluetooth chooser started in createWindow.
+  ipcMain.handle('robot-ble-select', (_e, deviceId: string) => {
+    if (!bleSelectCallback) return { ok: false }
+    try {
+      bleSelectCallback(typeof deviceId === 'string' ? deviceId : '')
+    } finally {
+      bleSelectCallback = null
+    }
+    return { ok: true }
+  })
   registerTextChat({ ipcMain })
   registerArchitect({ ipcMain })
   registerExcelMaster(ipcMain)

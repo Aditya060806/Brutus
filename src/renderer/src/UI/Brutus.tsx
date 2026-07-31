@@ -1,19 +1,18 @@
 ﻿import { useState, useEffect, Suspense, lazy } from 'react'
 import {
-  RiWifiLine,
   RiShieldFlashLine,
   RiLayoutGridLine,
   RiBrainLine,
   RiFolderOpenLine,
   RiPhoneLine,
   RiSettings4Line,
-  RiBatteryChargeLine,
   RiCameraLine,
   RiComputerLine,
   RiCloseLine,
   RiImageLine,
   RiSlideshow3Line,
-  RiNodeTree
+  RiNodeTree,
+  RiRobot2Line
 } from 'react-icons/ri'
 import { getSystemStatus } from '@renderer/services/system-info'
 import { getHistory } from '@renderer/services/brutus-ai-brain'
@@ -28,6 +27,7 @@ const WorkFlowEditorView = lazy(() => import('../views/WorkFlowEditor'))
 const NotesView = lazy(() => import('../views/Notes'))
 const SettingsView = lazy(() => import('../views/Settings'))
 const GalleryView = lazy(() => import('../views/Gallery'))
+const RobotView = lazy(() => import('../views/Robot'))
 
 interface BrutusProps {
   isSystemActive: boolean
@@ -50,11 +50,18 @@ const Brutus = (props: BrutusProps) => {
   const [chatHistory, setChatHistory] = useState<any[]>([])
   const [showSourceModal, setShowSourceModal] = useState(false)
 
+  // The clock is local and cheap, so it ticks every second. System stats are an
+  // IPC round-trip into the main process — polling those twice a second (as this
+  // did) meant four IPC calls per second forever, for numbers that move slowly.
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTime(new Date())
-      getSystemStatus().then(setStats)
-    }, 500)
+    const timer = setInterval(() => setTime(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const pull = (): void => void getSystemStatus().then(setStats)
+    pull()
+    const timer = setInterval(pull, 2000)
     return () => clearInterval(timer)
   }, [])
 
@@ -64,7 +71,7 @@ const Brutus = (props: BrutusProps) => {
       if (Array.isArray(history)) setChatHistory(history.slice(-15))
     }
     fetchHistory()
-    const interval = setInterval(fetchHistory, 500)
+    const interval = setInterval(fetchHistory, 1000)
     return () => clearInterval(interval)
   }, [])
 
@@ -78,69 +85,79 @@ const Brutus = (props: BrutusProps) => {
 
   return (
     <div className="h-screen w-full bg-black text-zinc-100 font-sans overflow-hidden select-none flex flex-col relative pb-5">
-      <div className="h-14 w-full flex items-center justify-between px-6 bg-zinc-950/80 border-b border-white/5 z-50 backdrop-blur-md">
-        <div className="hidden lg:flex items-center gap-3">
-          <RiShieldFlashLine className="text-red-500 text-xl animate-pulse" />
-          <div className="flex flex-col leading-none">
-            <span className="font-black tracking-[0.2em] text-sm text-zinc-100">BRUTUS AI</span>
-            <span className="text-[11px] font-mono text-red-500/60 tracking-widest">
-              NEURAL INTERFACE
-            </span>
-          </div>
+      {/* Top bar. Single accent (red), one line, 56px. Labels use one casing.
+          The old bar mixed DASHBOARD / Macros / Apps casing, ran a second accent
+          hue (cyan) on one action button, and showed a hardcoded "100%" battery
+          that was never real. */}
+      <div className="h-14 w-full flex items-center justify-between gap-4 px-5 bg-zinc-950/80 border-b border-white/[0.06] z-50 backdrop-blur-md">
+        <div className="hidden lg:flex items-center gap-2.5 shrink-0">
+          <RiShieldFlashLine className="text-red-500 text-lg" />
+          <span className="font-black tracking-[0.18em] text-[13px] text-zinc-100">BRUTUS</span>
         </div>
 
-        <div className="hidden md:flex gap-2 bg-black/40 p-1 rounded-lg border border-white/5">
+        <nav className="hidden md:flex items-center gap-0.5 bg-black/30 p-1 rounded-lg border border-white/[0.06]">
           {[
-            { id: 'DASHBOARD', icon: <RiLayoutGridLine /> },
-            { id: 'Macros', icon: <RiBrainLine /> },
-            { id: 'Apps', icon: <RiFolderOpenLine /> },
-            { id: 'NOTES', icon: <RiFolderOpenLine /> },
-            { id: 'GALLERY', icon: <RiImageLine /> },
-            { id: 'PHONE', icon: <RiPhoneLine /> },
-            { id: 'SETTINGS', icon: <RiSettings4Line /> }
+            { id: 'DASHBOARD', label: 'Home', icon: <RiLayoutGridLine /> },
+            { id: 'Macros', label: 'Macros', icon: <RiBrainLine /> },
+            { id: 'Apps', label: 'Apps', icon: <RiFolderOpenLine /> },
+            { id: 'NOTES', label: 'Notes', icon: <RiFolderOpenLine /> },
+            { id: 'GALLERY', label: 'Gallery', icon: <RiImageLine /> },
+            { id: 'PHONE', label: 'Phone', icon: <RiPhoneLine /> },
+            { id: 'ROBOT', label: 'Robot', icon: <RiRobot2Line /> },
+            { id: 'SETTINGS', label: 'Settings', icon: <RiSettings4Line /> }
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`cursor-pointer px-5 py-1.5 text-[10px] font-bold tracking-widest rounded-md transition-all duration-300 flex items-center gap-2 ${
+              className={`cursor-pointer px-3 py-1.5 text-[11px] font-semibold rounded-md transition-colors duration-200 flex items-center gap-1.5 ${
                 activeTab === tab.id
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.1)]'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                  ? 'bg-red-500/15 text-red-400'
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'
               }`}
             >
-              {tab.icon} {tab.id}
+              <span className="text-[13px]">{tab.icon}</span>
+              {tab.label}
             </button>
           ))}
 
-          <div className="w-px self-stretch my-1 bg-white/10" />
+          <div className="w-px self-stretch my-1.5 mx-1 bg-white/10" />
 
+          {/* Secondary tools stay neutral so they never outrank the nav or
+              introduce a second accent colour. */}
           <button
             onClick={() => window.dispatchEvent(new CustomEvent('open-deck-studio'))}
-            title="AI presentation maker"
-            className="cursor-pointer px-5 py-1.5 text-[10px] font-bold tracking-widest rounded-md transition-all duration-300 flex items-center gap-2 bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30 hover:text-red-200 hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
+            title="Deck Studio - AI presentation maker"
+            className="cursor-pointer p-2 rounded-md text-zinc-500 hover:text-red-400 hover:bg-white/5 transition-colors"
           >
-            <RiSlideshow3Line className="text-sm" /> DECK STUDIO
+            <RiSlideshow3Line className="text-[15px]" />
           </button>
-
           <button
             onClick={() => window.dispatchEvent(new CustomEvent('open-knowledge-graph'))}
-            title="Industrial knowledge graph — ingest documents & ask"
-            className="cursor-pointer px-5 py-1.5 text-[10px] font-bold tracking-widest rounded-md transition-all duration-300 flex items-center gap-2 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/30 hover:text-cyan-200 hover:shadow-[0_0_15px_rgba(6,182,212,0.25)]"
+            title="Knowledge Graph - ingest documents and ask"
+            className="cursor-pointer p-2 rounded-md text-zinc-500 hover:text-red-400 hover:bg-white/5 transition-colors"
           >
-            <RiNodeTree className="text-sm" /> KNOWLEDGE GRAPH
+            <RiNodeTree className="text-[15px]" />
           </button>
-        </div>
+        </nav>
 
-        <div className="flex items-center gap-6 text-[11px] font-mono font-bold opacity-60">
-          <div className="flex items-center gap-2 text-red-500">
-            <RiWifiLine /> <span>LINKED</span>
-          </div>
+        <div className="flex items-center gap-4 shrink-0">
           <div className="hidden sm:flex items-center gap-2">
-            <RiBatteryChargeLine /> <span>100%</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                props.isSystemActive ? 'bg-red-500' : 'bg-zinc-700'
+              }`}
+            />
+            <span
+              className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${
+                props.isSystemActive ? 'text-red-400' : 'text-zinc-600'
+              }`}
+            >
+              {props.isSystemActive ? 'Live' : 'Idle'}
+            </span>
           </div>
-          <div className="bg-zinc-800 px-2 py-1 rounded text-zinc-300">
-            {time.toLocaleTimeString()}
-          </div>
+          <span className="text-[11px] font-mono tabular-nums text-zinc-400">
+            {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
         </div>
       </div>
 
@@ -164,6 +181,7 @@ const Brutus = (props: BrutusProps) => {
           {activeTab === 'NOTES' && <NotesView glassPanel={glassPanel} />}
           {activeTab === 'SETTINGS' && <SettingsView isSystemActive={props.isSystemActive} />}
           {activeTab === 'GALLERY' && <GalleryView />}
+          {activeTab === 'ROBOT' && <RobotView />}
         </Suspense>
       </div>
 

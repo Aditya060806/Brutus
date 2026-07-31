@@ -1,11 +1,21 @@
 import { getHistory, saveMessage } from '@renderer/services/brutus-ai-brain'
 
+// Build-time .env fallback so text chat works out of the box (local/dev) even
+// before a key is saved in Settings. A vault/localStorage key takes precedence.
+const envGeminiKey = (): string =>
+  (
+    import.meta.env.VITE_BRUTUS_AI_API_KEY ||
+    import.meta.env.VITE_IRIS_AI_API_KEY ||
+    import.meta.env.VITE_GEMINI_API_KEY ||
+    ''
+  ).trim()
+
 const getGeminiKey = async (): Promise<string> => {
   try {
     const keys = await window.electron.ipcRenderer.invoke('secure-get-keys')
-    return (keys?.geminiKey || localStorage.getItem('brutus_custom_api_key') || '').trim()
+    return (keys?.geminiKey || localStorage.getItem('brutus_custom_api_key') || envGeminiKey()).trim()
   } catch {
-    return (localStorage.getItem('brutus_custom_api_key') || '').trim()
+    return (localStorage.getItem('brutus_custom_api_key') || envGeminiKey()).trim()
   }
 }
 

@@ -30,6 +30,8 @@ import { consultOracle, ingestCodebase } from '@renderer/tools/rag-oracle-tool'
 import { runDeepResearch } from '@renderer/tools/deepSearch-rag'
 import { runIndexDirectory, runSmartSearch } from '@renderer/tools/semantic-search-api'
 import { emotionBus } from '@renderer/components/BrutusEyes/emotionBus'
+import { robotController } from './robot-controller'
+import { executeRobotAction, matchRobotCommand } from './robot-voice-commands'
 import { analyzeAndReact, scanSentiment } from '@renderer/components/BrutusEyes/eyeConversation'
 import { closeWidgets, createWidget } from '@renderer/tools/widget-creator'
 import { buildAnimatedWebsite } from '@renderer/code/website-builder-api'
@@ -255,6 +257,12 @@ export class GeminiLiveService {
       const key = `${this.state}|${this.emotion}|${this.engine}`
       if (key === this._lastBridgeState) return
       this._lastBridgeState = key
+      // Same-renderer fan-out (physical robot auto-drive listens to this).
+      window.dispatchEvent(
+        new CustomEvent('brutus-voice-state', {
+          detail: { status: this.state, emotion: this.emotion, engine: this.engine }
+        })
+      )
       window.electron?.ipcRenderer?.invoke('bridge-publish-state', {
         status: this.state,
         emotion: this.emotion,
@@ -274,6 +282,9 @@ export class GeminiLiveService {
     })
     this.activeAudioNodes = []
     this.nextStartTime = 0
+    // Barge-in: drop the robot's buffered speech too, otherwise it keeps
+    // reciting the abandoned reply for seconds after the laptop goes quiet.
+    robotController.flushVoiceAudio()
   }
 
   // ── Edge (server) voice engine ─────────────────────────────────────────
@@ -506,6 +517,30 @@ export class GeminiLiveService {
     this.updateState()
 
     try {
+      // Robot commands are executed locally on this engine. The edge pipeline
+      // is a plain ASR → chat → TTS loop with no tool calling, so without this
+      // hook "nod" or "drive forward at 50%" would only get talked about, never
+      // performed. Matching also skips the LLM round-trip, so the body reacts
+      // immediately.
+      const robotHit = matchRobotCommand(userText)
+      if (robotHit) {
+        this._isProcessingTools = false
+        if (persist) {
+          await saveMessage('user', userText)
+          await saveMessage('brutus', robotHit.message)
+        }
+        const cue = await window.electron.ipcRenderer.invoke('brain-tts', {
+          text: robotHit.message
+        })
+        if (cue && cue.success && cue.base64) {
+          await this.playEdgeAudio(cue.base64)
+        } else {
+          this.edgeBusy = false
+          this.updateState()
+        }
+        return
+      }
+
       const history = persist ? await getHistory().catch(() => []) : []
       const messages = (Array.isArray(history) ? history : [])
         .map((h: any) => {
@@ -557,6 +592,47 @@ export class GeminiLiveService {
     }
   }
 
+  /**
+   * Downmix + resample a decoded AudioBuffer to the robot speaker's format:
+   * 16-bit LE mono PCM at 24 kHz, base64-encoded. Linear interpolation is
+   * plenty here — the ESP2 drives a small mono amp.
+   */
+  private audioBufferToPcm24kBase64(buffer: AudioBuffer): string {
+    const TARGET_RATE = 24000
+    const channels = buffer.numberOfChannels
+    const src = buffer.getChannelData(0)
+    const ratio = buffer.sampleRate / TARGET_RATE
+    const outLength = Math.floor(src.length / ratio)
+    if (outLength <= 0) return ''
+
+    const pcm = new Uint8Array(outLength * 2)
+    const view = new DataView(pcm.buffer)
+
+    for (let i = 0; i < outLength; i++) {
+      const pos = i * ratio
+      const i0 = Math.floor(pos)
+      const i1 = Math.min(i0 + 1, src.length - 1)
+      const frac = pos - i0
+
+      let sample = src[i0] + (src[i1] - src[i0]) * frac
+      // Fold any extra channels down to mono.
+      for (let ch = 1; ch < channels; ch++) {
+        const d = buffer.getChannelData(ch)
+        sample += (d[i0] + (d[i1] - d[i0]) * frac - sample) / (ch + 1)
+      }
+
+      const clamped = Math.max(-1, Math.min(1, sample))
+      view.setInt16(i * 2, Math.round(clamped * 32767), true) // little-endian
+    }
+
+    let binary = ''
+    const CHUNK = 0x8000 // avoid blowing the argument limit on long replies
+    for (let i = 0; i < pcm.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, Array.from(pcm.subarray(i, i + CHUNK)))
+    }
+    return btoa(binary)
+  }
+
   private base64ToArrayBuffer(base64: string): ArrayBuffer {
     const binary = atob(base64)
     const len = binary.length
@@ -573,6 +649,11 @@ export class GeminiLiveService {
     }
     try {
       const audioBuffer = await this.audioContext.decodeAudioData(this.base64ToArrayBuffer(base64))
+      // Feed the robot speaker too. Unlike the cloud path this audio is a
+      // decoded container at whatever rate the Brain Node's TTS produced, so it
+      // has to be resampled to the 24 kHz PCM16 the ESP2 amp runs at.
+      robotController.pushVoicePcm(this.audioBufferToPcm24kBase64(audioBuffer))
+
       const source = this.audioContext.createBufferSource()
       source.buffer = audioBuffer
       source.connect(this.analyser)
@@ -604,8 +685,9 @@ export class GeminiLiveService {
     this.userInitiatedDisconnect = false
 
     try {
-      // Voice engine selection. 'server' runs the on-device Brain Node pipeline
-      // (no Gemini key required); 'cloud' is the Gemini Live path below.
+      // Voice engine selection. 'cloud' is the Gemini Live path (the default);
+      // 'server' runs the on-device Brain Node pipeline and is only used when the
+      // operator explicitly selects it in Settings → API Keys → Voice Uplink.
       this.engine = localStorage.getItem('brutus_voice_engine') === 'server' ? 'server' : 'cloud'
       if (this.engine === 'server') {
         await this.connectEdge()
@@ -620,6 +702,18 @@ export class GeminiLiveService {
       }
 
       this.apiKey = this.apiKey.trim()
+
+      // Last-resort fallback to the build-time .env key so the cloud voice loop
+      // works out of the box (local/dev) without first saving a key in Settings.
+      // A key saved in the OS vault or localStorage always takes precedence.
+      if (!this.apiKey) {
+        this.apiKey = (
+          import.meta.env.VITE_BRUTUS_AI_API_KEY ||
+          import.meta.env.VITE_IRIS_AI_API_KEY ||
+          import.meta.env.VITE_GEMINI_API_KEY ||
+          ''
+        ).trim()
+      }
 
       if (!this.apiKey || this.apiKey === '') {
         throw new Error('NO_API_KEY')
@@ -1784,6 +1878,47 @@ ${JSON.stringify(history)}
                         }
                       },
                       required: ['emotion']
+                    }
+                  },
+                  {
+                    name: 'control_robot',
+                    description:
+                      'Controls the PHYSICAL Brutus robot(s) wired to this PC — the Arduino servo face and/or the V2 ESP32 rover (body, neck, hands, wheels, eye LEDs, buzzer and voice box). Use it whenever the user tells the robot to move, drive, emote, gesture, make a sound, or change mode: "move forward at 50% speed", "stop", "turn your head left", "look up", "nod", "wink", "do crazy eyes", "act confused", "raise your hands", "make your eyes green", "play the alarm sound", "turn the volume up", "go autonomous", "reset". You may also fire it mid-reply for a physical beat (a nod while agreeing, a blink while thinking). Only ONE action per call. If nothing is connected the tool says so — just relay that to the user.',
+                    parameters: {
+                      type: 'OBJECT',
+                      properties: {
+                        action: {
+                          type: 'STRING',
+                          description:
+                            'What to do. One of: "drive" (roll forward/backward), "stop" (stop the wheels), "head" (turn the neck), "look" (aim the eyes), "expression" (set the emotional face), "animation" (play a named move or trick), "blink", "eyelid" (open/close/widen the eyes), "hands" (raise/lower the arms), "mouth" (open/close the jaw), "led" (face LED pattern), "eye_color" (rover eye LEDs), "sound" (voice-box effect), "volume" (robot speaker loudness), "beep", "buzzer", "autonomous" (self-roaming on/off), "freeze" (hold perfectly still), "idle" (idle fidgeting on/off), "reset" (return everything to neutral).'
+                        },
+                        name: {
+                          type: 'STRING',
+                          description:
+                            'The named target for the action. For "animation": nod, shake, look around, wink, yawn, laugh, eye roll, mouth cycle, eye cycle, wiggle, crazy eyes, chatter, slow scan, peek-a-boo, double blink, jaw drop, drowsy, side eye, happy bounce, confused. For "expression": happy, angry, sad, thinking, sleepy, surprised, love, excited, confused, scared. For "sound": boot, patrol, curious, alarm, relief, happy, mumble, silence, thinking, listening, error, success, notify, shutdown. For "eye_color": off, blue, green, both. For "led": off, solid, pulse, fast. For "eyelid": open, close, wide. For "hands": raise, lower.'
+                        },
+                        percent: {
+                          type: 'NUMBER',
+                          description:
+                            'Speed as a percentage 0-100, for action="drive". "half speed" = 50, "full speed" = 100, "slowly" = 30. Defaults to 60 when the user does not say.'
+                        },
+                        direction: {
+                          type: 'STRING',
+                          description:
+                            'For "drive": forward or backward. For "head": left, right, center. For "look": left, right, up, down, center, upper left, upper right, lower left, lower right.'
+                        },
+                        level: {
+                          type: 'NUMBER',
+                          description:
+                            'For "volume": 0-9 (or 0-100, which is scaled). For "mouth": 0 closed to 1 wide open.'
+                        },
+                        on: {
+                          type: 'BOOLEAN',
+                          description:
+                            'On/off switch for "autonomous", "freeze", "idle" and "buzzer". Defaults to true.'
+                        }
+                      },
+                      required: ['action']
                     }
                   },
                   {
@@ -3359,6 +3494,15 @@ ${JSON.stringify(history)}
                         }
                       }
                       result = `Eye expression set: ${emotion ?? ''}${gesture ? ` + gesture ${gesture}` : ''}`
+                    } else if (call.name === 'control_robot') {
+                      const { action, name, percent, direction, level, on } = call.args
+                      result = executeRobotAction(String(action || ''), {
+                        name: name !== undefined ? String(name) : undefined,
+                        percent: percent !== undefined ? Number(percent) : undefined,
+                        direction: direction !== undefined ? String(direction) : undefined,
+                        level: level !== undefined ? Number(level) : undefined,
+                        on: on !== undefined ? Boolean(on) : undefined
+                      }).message
                     } else if (call.name === 'convert_file') {
                       result = await convertFile(
                         call.args.source_path,
@@ -3788,6 +3932,11 @@ ${JSON.stringify(history)}
     const float32Data = base64ToFloat32(base64Audio)
     // Empty/corrupt chunk — createBuffer throws on a zero length, so skip it.
     if (!float32Data.length) return
+
+    // Mirror the same audio to the V2 robot's speaker. Gemini already sends
+    // 16-bit LE mono @ 24 kHz, which is exactly what the ESP2 amp expects, so
+    // the base64 is forwarded untouched; the main process paces it to real time.
+    robotController.pushVoicePcm(base64Audio)
 
     try {
       const buffer = this.audioContext.createBuffer(1, float32Data.length, 24000)

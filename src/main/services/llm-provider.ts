@@ -8,11 +8,17 @@ import { GoogleGenAI } from '@google/genai'
  * BRUTUS LLM Provider Adapter
  * ---------------------------
  * The Command PC does NO inference of its own. This adapter is the single
- * gateway every text-generation call goes through:
+ * gateway every conversational text request goes through:
  *
- *   • PRIMARY  → the Snapdragon "Brain Node" (OpenAI-shaped /v1/chat on the NPU)
- *   • FALLBACK → Google Gemini, whenever the Brain Node is disabled, unreachable,
- *                or errors mid-request.
+ *   • Brain Node routing OFF (the default) → Gemini (cloud) answers every
+ *     request. This is the out-of-the-box behaviour so the app works without any
+ *     local/edge inference or a reachable Brain Node.
+ *   • Brain Node routing ON → an explicit, operator-chosen mode where EVERY
+ *     request is served by the Snapdragon "Brain Node" (OpenAI-shaped /v1/chat,
+ *     Qwen on the NPU) and nothing silently escapes to a cloud API. If the node
+ *     is unreachable we re-probe, retry once, then surface an honest error — we
+ *     do NOT fall back to Gemini behind the operator's back. Turn this on in
+ *     Settings → API Keys → Brain Node only when an edge node is actually up.
  *
  * UI-generation features (Live Forge website builder, Architect) deliberately do
  * NOT go through routing — they call Gemini directly and only borrow
@@ -26,7 +32,7 @@ import { GoogleGenAI } from '@google/genai'
  * Config resolution (highest priority first):
  *   Brain URL    : env BRUTUS_BRAIN_URL   → stored config → http://10.113.246.106:8080 (LAN device)
  *   Brain key    : env BRUTUS_API_KEY     → stored config → "" (open node)
- *   Routing flag : env BRUTUS_LLM_ROUTING → stored config → enabled
+ *   Routing flag : env BRUTUS_LLM_ROUTING → stored config → disabled (cloud default)
  *   Gemini key   : caller-passed          → env GEMINI_API_KEY → encrypted vault
  */
 
@@ -96,12 +102,20 @@ export function getBrainConfig(): BrainConfig {
 
   const envRouting = parseBoolEnv(process.env.BRUTUS_LLM_ROUTING)
   const enabled =
-    envRouting !== null ? envRouting : saved.enabled !== undefined ? saved.enabled : true
+    envRouting !== null ? envRouting : saved.enabled !== undefined ? saved.enabled : false
 
-  const healthTimeoutMs =
+  // Floor on the health probe. On venue Wi-Fi the first TCP connect to the LAN
+  // node can eat ~2.4s on its own, and a full /health round-trip lands around
+  // ~3.5s. Anything under ~8s makes a perfectly healthy node read as OFFLINE on
+  // the first hit, so we clamp up even when an older stored config asked for
+  // something shorter (early builds saved 2500 here). A truly down node still
+  // reports fast enough because the result is cached for HEALTH_TTL_MS.
+  const MIN_HEALTH_TIMEOUT_MS = 8000
+  const savedHealthTimeout =
     typeof saved.healthTimeoutMs === 'number' && saved.healthTimeoutMs > 0
       ? saved.healthTimeoutMs
-      : 2500
+      : MIN_HEALTH_TIMEOUT_MS
+  const healthTimeoutMs = Math.max(savedHealthTimeout, MIN_HEALTH_TIMEOUT_MS)
   const chatTimeoutMs =
     typeof saved.chatTimeoutMs === 'number' && saved.chatTimeoutMs > 0 ? saved.chatTimeoutMs : 30000
 
@@ -286,19 +300,52 @@ async function geminiChat(
 export async function runChat(opts: RunChatOptions): Promise<ChatResult> {
   const cfg = getBrainConfig()
 
+  // ── Edge-only path (opt-in) ───────────────────────────────────────────────
+  // Routing on means the Qwen Brain Node answers EVERY request. No cloud API is
+  // ever touched here: if the node is down we re-probe, retry the chat once, and
+  // then return an honest error instead of quietly leaking the prompt to Gemini.
   if (cfg.enabled) {
-    const health = await checkBrainHealth()
-    if (health.ok && brainChatReady(health.data)) {
+    let health = await checkBrainHealth()
+    if (!health.ok || !brainChatReady(health.data)) {
+      // A cold first hit on venue Wi-Fi can time out; force one fresh probe.
+      health = await checkBrainHealth(true)
+    }
+    if (!health.ok || !brainChatReady(health.data)) {
+      return {
+        text: '',
+        emotion: null,
+        backend: 'none',
+        error:
+          `Brain Node unreachable at ${cfg.baseUrl}. Edge-only routing is on, so no cloud ` +
+          `fallback was used. Confirm the Qwen server is running and reachable, then retry.`
+      }
+    }
+
+    // Node is healthy — run the chat, with a single retry on a transient error.
+    let lastErr: unknown = null
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const r = await brainChat(opts)
         return { ...r, backend: 'brain' }
       } catch (err) {
-        console.error('[LLM] Brain Node chat failed — falling back to Gemini:', err)
-        healthCache = null // re-probe on the next call rather than trusting stale "ok"
+        lastErr = err
+        healthCache = null // don't trust a stale "ok" after a mid-request failure
+        console.error(`[LLM] Brain Node chat attempt ${attempt}/2 failed:`, err)
       }
+    }
+    return {
+      text: '',
+      emotion: null,
+      backend: 'none',
+      error:
+        `Brain Node chat failed after a retry (edge-only routing, no cloud fallback): ` +
+        String(lastErr)
     }
   }
 
+  // ── Cloud path (default) ──────────────────────────────────────────────────
+  // Reached whenever Brain Node routing is OFF (the default). Gemini answers the
+  // request. Routing is only ON when the operator deliberately enables it.
   const key = resolveGeminiKey(opts.geminiKey)
   if (!key) {
     return {
@@ -306,7 +353,8 @@ export async function runChat(opts: RunChatOptions): Promise<ChatResult> {
       emotion: null,
       backend: 'none',
       error:
-        'No response available: the Brain Node is unreachable and no Gemini API key is configured for fallback.'
+        'Brain Node routing is turned off and no Gemini key is configured, so there is no ' +
+        'backend to answer. Turn routing back on to use the local Qwen node.'
     }
   }
   try {
