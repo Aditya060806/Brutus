@@ -265,11 +265,16 @@ export interface MissionStep {
   dependsOn: string | null
 }
 
+export type ComplexityTier = 'simple' | 'standard' | 'complex'
+
 export interface MissionPlan {
   id: string
+  /** The canvas this crew belongs to. Scopes the board to its own workspace. */
+  workspaceId: string
   task: string
   summary: string
   steps: MissionStep[]
+  complexity: ComplexityTier
 }
 
 export interface MissionStepState extends MissionStep {
@@ -283,6 +288,7 @@ export interface MissionStepState extends MissionStep {
 
 export interface MissionState {
   id: string
+  workspaceId: string
   task: string
   summary: string
   status: MissionStatus
@@ -537,8 +543,11 @@ class StudioClient {
   }
 
   /** Stop every agent and every routing chain. The deliberate way to end a run. */
-  async stopAll(): Promise<number> {
-    const res = (await window.electron.ipcRenderer.invoke('studio-stop-all')) as {
+  async stopAll(workspaceId: string, nodeIds: string[]): Promise<number> {
+    const res = (await window.electron.ipcRenderer.invoke('studio-stop-all', {
+      workspaceId,
+      nodeIds
+    })) as {
       stopped?: number
     }
     this.lastPreviews.clear()
@@ -572,14 +581,20 @@ class StudioClient {
   /**
    * Turn one request into a crew. Plans only — nothing spawns until `startMission`.
    */
-  async planMission(task: string): Promise<{
+  async planMission(
+    task: string,
+    workspaceId: string
+  ): Promise<{
     ok: boolean
     plan?: MissionPlan
     edges?: MissionEdge[]
     skipped?: string[]
     error?: string
   }> {
-    return (await window.electron.ipcRenderer.invoke('studio-mission-plan', { task })) as {
+    return (await window.electron.ipcRenderer.invoke('studio-mission-plan', {
+      task,
+      workspaceId
+    })) as {
       ok: boolean
       plan?: MissionPlan
       edges?: MissionEdge[]
@@ -604,15 +619,19 @@ class StudioClient {
     })) as { ok: boolean; mission?: MissionState; error?: string }
   }
 
-  async missionState(): Promise<MissionState | null> {
-    const res = (await window.electron.ipcRenderer.invoke('studio-mission-state')) as {
+  async missionState(workspaceId: string): Promise<MissionState | null> {
+    const res = (await window.electron.ipcRenderer.invoke('studio-mission-state', {
+      workspaceId
+    })) as {
       mission?: MissionState | null
     }
     return res?.mission ?? null
   }
 
-  async abortMission(): Promise<MissionState | null> {
-    const res = (await window.electron.ipcRenderer.invoke('studio-mission-abort')) as {
+  async abortMission(workspaceId: string): Promise<MissionState | null> {
+    const res = (await window.electron.ipcRenderer.invoke('studio-mission-abort', {
+      workspaceId
+    })) as {
       mission?: MissionState | null
     }
     return res?.mission ?? null

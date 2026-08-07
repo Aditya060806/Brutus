@@ -73,6 +73,7 @@ import { COMMAND_SYSTEM, commandPrompt, validateMutations } from './command'
 import {
   MISSION_SYSTEM,
   MissionTracker,
+  estimateComplexity,
   missionEdges,
   missionPrompt,
   validateMission,
@@ -547,7 +548,7 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
   app.on('before-quit', () => {
     // Stop routing before tearing down, so nothing tries to deliver into a
     // terminal that is in the middle of being killed.
-    mission?.abort('Brutus is closing.')
+    for (const m of missions.values()) m.abort('Brutus is closing.')
     router.cancelAll('cancelled: quitting')
     for (const id of Array.from(sessions.keys())) teardownSession(id)
     manager.killAll()
@@ -788,20 +789,44 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
   }))
 
   /**
-   * Stop every agent at once.
+   * Stop agents in one go.
    *
    * The counterpart to agents surviving a workspace being closed: something has
    * to be able to end them, and hunting for the window each one lives in is not
-   * that. Offered from the launcher, where the running count is visible.
+   * that.
+   *
+   * Scoped by the node ids the calling canvas actually owns. Main has no idea
+   * which workspace a session belongs to — only which node — so the canvas says.
+   * Without that scope, "Stop all" in one workspace killed a crew still working
+   * in another, which is the exact work the survive-on-close behaviour exists to
+   * protect. Passing nothing keeps the old meaning: stop everything, everywhere.
    */
-  ipcMain.handle('studio-stop-all', async () => {
-    mission?.abort('Every agent was stopped.')
-    router.cancelAll('cancelled: all agents stopped')
-    const live = manager.list()
-    for (const s of live) manager.kill(s.id)
-    log(`[studio] stopped ${live.length} agent(s)`)
-    return { ok: true, stopped: live.length }
-  })
+  ipcMain.handle(
+    'studio-stop-all',
+    async (_e, { workspaceId, nodeIds }: { workspaceId?: string; nodeIds?: string[] } = {}) => {
+      const scope = Array.isArray(nodeIds) && nodeIds.length ? new Set(nodeIds) : null
+
+      if (scope) {
+        const key = String(workspaceId ?? '')
+        missions.get(key)?.abort('Every agent in this workspace was stopped.')
+      } else {
+        for (const m of missions.values()) m.abort('Every agent was stopped.')
+      }
+
+      // The router does not track cascades per workspace, so this is all-or-
+      // nothing. Stopping a chain that was about to type into a terminal being
+      // killed is the safer side of that trade.
+      router.cancelAll('cancelled: agents stopped')
+
+      const doomed = manager
+        .list()
+        .filter((s) => !scope || scope.has(sessions.get(s.id)?.nodeId ?? ''))
+      for (const s of doomed) manager.kill(s.id)
+
+      log(`[studio] stopped ${doomed.length} agent(s)`)
+      return { ok: true, stopped: doomed.length }
+    }
+  )
 
   /**
    * What the agent picker renders. Re-detects on each open so installing an
@@ -877,7 +902,7 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
    * killed. This is now the explicit "stop" the user presses.
    */
   ipcMain.handle('studio-cancel-routing', async () => {
-    mission?.abort('Routing was stopped.')
+    for (const m of missions.values()) m.abort('Routing was stopped.')
     return { ok: true, cancelled: router.cancelAll('cancelled by the operator') }
   })
 
@@ -1060,38 +1085,58 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
     ) => {
       if (!plan?.steps?.length) return { ok: false, error: 'There is no plan to run.' }
 
-      // A previous mission still running would keep receiving turn events from
-      // nodes the new one is about to reuse.
-      if (mission) mission.abort('Replaced by a new mission.')
+      const key = String(plan.workspaceId ?? '')
 
-      mission = new MissionTracker(plan, Array.isArray(bindings) ? bindings : [], {
+      /**
+       * Only THIS workspace's previous mission is replaced.
+       *
+       * A crew running on another canvas is untouched: its terminals are alive,
+       * its handoffs are in flight, and aborting it because a different
+       * workspace started something would silently strand real work.
+       */
+      const previous = missions.get(key)
+      if (previous) previous.abort('Replaced by a new mission in this workspace.')
+
+      const tracker = new MissionTracker(plan, Array.isArray(bindings) ? bindings : [], {
         sessionForNode: (nodeId) => router.sessionForNode(nodeId),
         deliver: (sessionId, text) => manager.enqueue(sessionId, text),
         record: (level, event, message, fields) =>
           telemetry.record(level, 'mission', event, message, fields, { traceId: plan.id })
       })
+      missions.set(key, tracker)
 
-      return { ok: true, mission: mission.snapshot() }
+      return { ok: true, mission: tracker.snapshot() }
     }
   )
 
-  ipcMain.handle('studio-mission-state', async () => ({
-    ok: true,
-    mission: mission ? mission.snapshot() : null
-  }))
+  /**
+   * The board for one canvas.
+   *
+   * Scoped by workspace so re-entering a workspace shows the crew that is
+   * actually on it. Without the id this returned whichever mission started most
+   * recently, anywhere — which read as the Dashboard "remembering" a run that
+   * belonged to a different project.
+   */
+  ipcMain.handle('studio-mission-state', async (_e, { workspaceId }: { workspaceId?: string }) => {
+    const tracker = missions.get(String(workspaceId ?? ''))
+    return { ok: true, mission: tracker ? tracker.snapshot() : null }
+  })
 
   /**
-   * Stop the mission and everything it set off.
+   * Stop one workspace's mission and everything it set off.
    *
    * Cancelling the router's cascades matters as much as stopping the tracker: a
    * chain already two agents deep would otherwise keep delivering work for a
-   * mission the user has plainly stopped.
+   * mission the user has plainly stopped. That cancel is global — the router
+   * does not track cascades per workspace — which is why it only runs when there
+   * was actually a mission here to stop.
    */
-  ipcMain.handle('studio-mission-abort', async () => {
-    if (!mission) return { ok: true, mission: null }
-    mission.abort()
+  ipcMain.handle('studio-mission-abort', async (_e, { workspaceId }: { workspaceId?: string }) => {
+    const tracker = missions.get(String(workspaceId ?? ''))
+    if (!tracker) return { ok: true, mission: null }
+    tracker.abort()
     router.cancelAll('cancelled: mission stopped')
-    return { ok: true, mission: mission.snapshot() }
+    return { ok: true, mission: tracker.snapshot() }
   })
 
   // ── Dock ──────────────────────────────────────────────────────────────────
@@ -1125,7 +1170,9 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
           awaitingHuman: pending.size + pendingKeys.size
         },
         git: { reposBusy: busyRepoCount() },
-        mission: mission ? mission.snapshot().totals : null,
+        missions: Array.from(missions.values())
+          .filter((m) => m.status === 'running')
+          .map((m) => ({ workspaceId: m.workspaceId, ...m.snapshot().totals })),
         projects: journal.projectCount(),
         metrics: telemetry.metrics(),
         spawning: spawning.size,
