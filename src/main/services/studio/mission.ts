@@ -125,6 +125,7 @@ export interface MissionStepState extends MissionStep {
 
 export interface MissionState {
   id: string
+  workspaceId: string
   task: string
   summary: string
   status: MissionStatus
@@ -255,8 +256,21 @@ export const MISSION_SYSTEM = [
   '',
   'Rules:',
   '- Use only agentKind values listed as AVAILABLE. Never invent one.',
-  '- Between 1 and 6 steps. Prefer the fewest that genuinely do the job; two',
-  '  agents doing the same work is worse than one.',
+  '',
+  'CREW SIZE — you decide this, the user never states it:',
+  '- NEVER fewer than 2 agents. One agent marking its own work is not a crew.',
+  '- The default pairing is ONE claude to build and ONE codex to review it.',
+  '  Start there and add only what the work actually needs.',
+  '- Size the crew to the COMPLEXITY block below. It gives you a target range;',
+  '  stay inside it unless the request plainly contradicts it, and never exceed 6.',
+  '- Scale UP by splitting real, separable work — not by duplicating a job:',
+  '    two claude agents only when there are two independent areas to build',
+  '    (e.g. backend and frontend), each with its own files;',
+  '    a second codex when there is a genuinely separate thing to review;',
+  '    a gemini to run tests, analyse, or summarise what changed.',
+  '- Two agents editing the same files is worse than one. If you cannot say what',
+  '  each agent owns, you have too many.',
+  '',
   '- "dependsOn" is null, or the "ref" of a step listed EARLIER in the array.',
   '  A step may depend on at most one other. Several steps may depend on the',
   '  same one (fan-out) — that is how parallel work is expressed.',
@@ -274,11 +288,13 @@ export const MISSION_SYSTEM = [
 export function missionPrompt(
   task: string,
   availableKinds: AgentKind[],
-  context: { projectName?: string; rootDir?: string } = {}
+  context: { projectName?: string; rootDir?: string; complexity?: ComplexityEstimate } = {}
 ): string {
   const where = context.projectName
     ? `PROJECT: ${context.projectName}${context.rootDir ? ` (${context.rootDir})` : ''}`
     : 'PROJECT: (no folder chosen — agents open in the workspace default)'
+
+  const complexity = context.complexity ?? estimateComplexity(task)
 
   return [
     `AVAILABLE agentKind values: ${availableKinds.join(', ') || 'none'}`,
@@ -290,8 +306,15 @@ export function missionPrompt(
     '- gemini: analysis, test running, summarising what changed',
     '- shell: a plain terminal — only when the job really is just commands',
     '',
+    'COMPLEXITY (measured from the request, not guessed):',
+    `- judged: ${complexity.tier}`,
+    `- aim for ${complexity.crew.min}–${complexity.crew.max} agents`,
+    complexity.signals.length ? `- because it ${complexity.signals.join('; ')}` : '',
+    '',
     `REQUEST: ${task}`
-  ].join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 // ─── Validation ─────────────────────────────────────────────────────────────
@@ -303,8 +326,27 @@ export interface ValidateMissionOpts {
   availableKinds: AgentKind[]
   /** The human's request, kept verbatim rather than taken from the model. */
   task: string
+  /** The canvas this crew will be placed on. */
+  workspaceId?: string
   /** Injected so a test gets a stable id. */
   id?: string
+}
+
+/**
+ * Who should check the work, given who did it.
+ *
+ * Preference order is codex → gemini → claude, skipping whoever just built the
+ * thing. A reviewer of the same kind as the builder tends to make the same
+ * assumptions and miss the same things, so a different pair of eyes is worth
+ * more than the "best" model twice.
+ */
+function pickReviewer(available: AgentKind[], builtBy: AgentKind | null): AgentKind | null {
+  const order: AgentKind[] = ['codex', 'gemini', 'claude']
+  return (
+    order.find((k) => k !== builtBy && available.includes(k)) ??
+    order.find((k) => available.includes(k)) ??
+    null
+  )
 }
 
 export interface MissionValidation {
@@ -407,12 +449,55 @@ export function validateMission(raw: unknown, opts: ValidateMissionOpts): Missio
 
   if (!steps.length) return { plan: null, skipped }
 
+  /**
+   * Enforce the crew floor.
+   *
+   * The system prompt asks for at least two agents; this is what makes it true.
+   * A model that returns one step — because the request looked trivial, or
+   * because it ignored the instruction — would otherwise produce a "crew" of one
+   * terminal reviewing itself.
+   *
+   * Only ever tops up a plan that is BELOW the floor. A model that returned two
+   * or more has made a considered choice about who does what, and adding an
+   * uninvited agent to that risks two of them editing the same files — the one
+   * failure the crew-size rules exist to avoid.
+   */
+  while (steps.length < MIN_STEPS) {
+    const last = steps[steps.length - 1]
+    const kind = pickReviewer(opts.availableKinds, last.agentKind)
+    if (!kind) break // nothing installed to add; one agent is better than none
+
+    steps.push({
+      ref: `_check${steps.length}`,
+      agentKind: kind,
+      title: 'Atlas',
+      role: 'Review and verify',
+      /**
+       * Written here rather than asked for, and deliberately narrow: check what
+       * the previous agent did against what was actually requested. It is the
+       * one brief that is always correct without knowing the plan, because the
+       * router hands this agent the builder's output anyway.
+       */
+      brief:
+        `Review the work the previous agent just did for this request: "${opts.task}". ` +
+        'Read the files that changed, check it actually does what was asked, and run the ' +
+        'tests if there are any. Report what is genuinely working and what is not — do not ' +
+        'assume it is correct.',
+      dependsOn: last.ref
+    })
+    skipped.push(
+      `Only one agent was planned, so a ${kind} step was added to review the work — a crew is never one agent.`
+    )
+  }
+
   return {
     plan: {
       id: opts.id ?? `msn_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      workspaceId: opts.workspaceId ?? '',
       task: opts.task,
       summary: str((raw as { summary?: unknown })?.summary, MAX_SUMMARY_CHARS) || opts.task,
-      steps
+      steps,
+      complexity: estimateComplexity(opts.task).tier
     },
     skipped
   }
@@ -472,6 +557,7 @@ export class MissionTracker {
 
     this.state = {
       id: plan.id,
+      workspaceId: plan.workspaceId,
       task: plan.task,
       summary: plan.summary,
       status: 'running',
@@ -514,6 +600,19 @@ export class MissionTracker {
 
   get id(): string {
     return this.state.id
+  }
+
+  get workspaceId(): string {
+    return this.state.workspaceId
+  }
+
+  /** Is this canvas node one of ours? How an event finds its mission. */
+  owns(nodeId: string): boolean {
+    return this.byNode.has(nodeId)
+  }
+
+  get status(): MissionStatus {
+    return this.state.status
   }
 
   private step(ref: string): MissionStepState | undefined {

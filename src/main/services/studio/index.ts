@@ -147,13 +147,30 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
   let approvalSeq = 0
 
   /**
-   * The Dashboard's live mission, if one is running.
+   * Live missions, one per workspace.
    *
-   * Exactly one at a time, and deliberately so: a mission owns the canvas it
-   * planned, and two of them interleaving their steps across the same nodes
-   * would produce a board that describes neither.
+   * Not a single global. Agents outlive the canvas being closed, so a user can
+   * start a crew in one workspace, back out to the launcher and start another
+   * elsewhere — and both are genuinely still running. A single slot meant the
+   * second `studio-mission-start` aborted the first, and every Dashboard showed
+   * whichever mission began last no matter which canvas it was looking at.
+   *
+   * Keyed by workspace id, which is also what makes re-entering a workspace show
+   * its own board again rather than someone else's.
    */
-  let mission: MissionTracker | null = null
+  const missions = new Map<string, MissionTracker>()
+
+  /**
+   * The mission that owns a canvas node.
+   *
+   * Turn, status and exit events arrive with a node id and no workspace, so the
+   * owner is found by asking. The map holds one entry per workspace with a crew
+   * on it, so this is a handful of lookups at most.
+   */
+  const missionForNode = (nodeId: string): MissionTracker | null => {
+    for (const m of missions.values()) if (m.owns(nodeId)) return m
+    return null
+  }
 
   const emit = (event: StudioEvent): void => {
     const win = getWindow()
@@ -221,7 +238,7 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
       // Before the journal, and before the handoff fires: the dashboard must
       // show a step as done at the moment it finished, not after the next agent
       // has already been prompted.
-      mission?.noteTurn(nodeId, summary)
+      missionForNode(nodeId)?.noteTurn(nodeId, summary)
 
       const meta = sessions.get(sessionId)
       if (!meta?.projectRoot) return
@@ -447,7 +464,7 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
     // The mission dispatches a root step on its agent's first `idle` — the CLI
     // itself saying it has finished booting and is ready to be typed into.
     const nodeId = sessions.get(sessionId)?.nodeId
-    if (nodeId) mission?.noteStatus(nodeId, status)
+    if (nodeId) missionForNode(nodeId)?.noteStatus(nodeId, status)
   })
 
   const teardownSession = (sessionId: string): void => {
@@ -512,7 +529,7 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
    */
   manager.onExit((sessionId, exitCode) => {
     const nodeId = sessions.get(sessionId)?.nodeId
-    if (nodeId) mission?.noteExit(nodeId, exitCode)
+    if (nodeId) missionForNode(nodeId)?.noteExit(nodeId, exitCode)
     teardownSession(sessionId)
   })
 
@@ -943,64 +960,90 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
    * removed anything unrunnable by the time it is displayed, so what is on
    * screen is exactly what will happen.
    */
-  ipcMain.handle('studio-mission-plan', async (_e, { task }: { task?: string }) => {
-    const text = String(task ?? '').trim()
-    if (!text) return { ok: false, error: 'Say what you want done.' }
+  ipcMain.handle(
+    'studio-mission-plan',
+    async (_e, { task, workspaceId }: { task?: string; workspaceId?: string }) => {
+      const text = String(task ?? '').trim()
+      if (!text) return { ok: false, error: 'Say what you want done.' }
 
-    const model = getSharedModelRouter()
-    if (!model) {
-      return { ok: false, error: 'No model is configured. Add a key in Settings first.' }
-    }
-
-    const availableKinds = adapterAvailability()
-      .filter((a) => a.available)
-      .map((a) => a.kind)
-    if (!availableKinds.length) {
-      return { ok: false, error: 'No agent CLIs are installed, so there is no crew to assemble.' }
-    }
-
-    // Any live session tells us which project the canvas is pointed at, which
-    // is worth far more to the planner than the folder name alone.
-    const anySession = Array.from(sessions.values())[0]
-    const projectRoot = anySession?.projectRoot || ''
-
-    const span = telemetry.startSpan('mission', 'plan', { task: text.slice(0, 120) })
-    try {
-      const { data } = await model.completeJson<unknown>({
-        role: 'plan',
-        system: MISSION_SYSTEM,
-        messages: [
-          {
-            role: 'user',
-            content: missionPrompt(text, availableKinds, {
-              projectName: projectRoot ? path.basename(projectRoot) : undefined,
-              rootDir: projectRoot || undefined
-            })
-          }
-        ],
-        temperature: 0.2,
-        maxTokens: 2000
-      })
-
-      const { plan, skipped } = validateMission(data, { availableKinds, task: text })
-      for (const note of skipped) log(`[mission] ${note}`)
-
-      if (!plan) {
-        span.end('empty')
-        return {
-          ok: false,
-          error: 'That could not be turned into work for coding agents.',
-          skipped
-        }
+      const model = getSharedModelRouter()
+      if (!model) {
+        return { ok: false, error: 'No model is configured. Add a key in Settings first.' }
       }
 
-      span.end('ok', { steps: plan.steps.length })
-      return { ok: true, plan, edges: missionEdges(plan), skipped }
-    } catch (err) {
-      span.fail(err)
-      return { ok: false, error: String((err as { message?: string })?.message || err) }
+      const availableKinds = adapterAvailability()
+        .filter((a) => a.available)
+        .map((a) => a.kind)
+      if (!availableKinds.length) {
+        return { ok: false, error: 'No agent CLIs are installed, so there is no crew to assemble.' }
+      }
+
+      // Any live session tells us which project the canvas is pointed at, which
+      // is worth far more to the planner than the folder name alone.
+      const anySession = Array.from(sessions.values())[0]
+      const projectRoot = anySession?.projectRoot || ''
+
+      /**
+       * Measured before the model is asked, and passed to it.
+       *
+       * The user never says how many agents to open, so something has to decide.
+       * Doing it here rather than leaving it to the model's mood means the crew
+       * size has an inspectable reason behind it, and the same request twice
+       * lands in the same bracket.
+       */
+      const complexity = estimateComplexity(text)
+
+      const span = telemetry.startSpan('mission', 'plan', {
+        task: text.slice(0, 120),
+        complexity: complexity.tier,
+        crew: `${complexity.crew.min}-${complexity.crew.max}`
+      })
+      try {
+        const { data } = await model.completeJson<unknown>({
+          role: 'plan',
+          system: MISSION_SYSTEM,
+          messages: [
+            {
+              role: 'user',
+              content: missionPrompt(text, availableKinds, {
+                projectName: projectRoot ? path.basename(projectRoot) : undefined,
+                rootDir: projectRoot || undefined,
+                complexity
+              })
+            }
+          ],
+          temperature: 0.2,
+          maxTokens: 2000
+        })
+
+        const { plan, skipped } = validateMission(data, {
+          availableKinds,
+          task: text,
+          workspaceId: String(workspaceId ?? '')
+        })
+        for (const note of skipped) log(`[mission] ${note}`)
+
+        if (!plan) {
+          span.end('empty')
+          return {
+            ok: false,
+            error: 'That could not be turned into work for coding agents.',
+            skipped
+          }
+        }
+
+        log(
+          `[mission] ${complexity.tier} request → ${plan.steps.length} agent(s): ` +
+            plan.steps.map((s) => `${s.title} (${s.agentKind})`).join(', ')
+        )
+        span.end('ok', { steps: plan.steps.length })
+        return { ok: true, plan, edges: missionEdges(plan), skipped, complexity }
+      } catch (err) {
+        span.fail(err)
+        return { ok: false, error: String((err as { message?: string })?.message || err) }
+      }
     }
-  })
+  )
 
   /**
    * Begin tracking a plan the renderer has already laid out on the canvas.

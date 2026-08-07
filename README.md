@@ -33,20 +33,8 @@ Real coding agents on a canvas, wired to each other. Eight LLM specialists worki
 **[Presentation](https://drive.google.com/file/d/10COwSTOePot8Zara3cNQorNXDBU2ZgEv/view?usp=drive_link)**
 ·
 **[Mobile app](https://drive.google.com/file/d/1Kx65uAB4ZQd_GtXpthFN1rXMXsq0oIMh/view?usp=sharing)**
-·
-**[Brain Node server](https://github.com/Aditya060806/Ai-Qualcom-backend)**
 
 </div>
-
----
-
-## Team Brutus
-
-| Name | Email |
-|:--|:--|
-| Aditya Pandey | aditya060806@gmail.com |
-| Palak Rai | palakrai32323@gmail.com |
-| Avik Srivastava | aviksrivastava786@gmail.com |
 
 ---
 
