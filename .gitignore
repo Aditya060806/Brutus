@@ -1,0 +1,39 @@
+node_modules
+dist
+out
+.vite/
+
+.DS_Store
+.eslintcache
+*.log*
+
+.env
+.env.*
+!.env.example
+
+.idea/
+
+
+credentials.json
+gmail_token.json
+
+eng.traineddata
+
+versions/
+versions.json
+**/versions.json
+
+# Dev artifacts
+npm-errors.txt
+electron.vite.config.*.mjs
+BRUTUS_CODEBASE_SUMMARY.md
+*.traineddata
+# Test bundles (regenerate with: node tests/build.mjs)
+tests/**/*.test.cjs
+HANDOFF.md
+
+# Bundled ML models — build output, fetched by `npm run fetch:models`.
+# Large binaries that must never enter git; electron-builder copies them into
+# the installer via `extraResources`.
+resources/models/*
+!resources/models/README.md
