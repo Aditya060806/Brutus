@@ -69,10 +69,22 @@ export interface MissionDashboardProps {
     plan: MissionPlan,
     edges: MissionEdge[]
   ) => Promise<{ ok: boolean; bindings?: { ref: string; nodeId: string }[]; error?: string }>
+  /**
+   * The canvas this Dashboard belongs to.
+   *
+   * Every mission call carries it, so a workspace only ever plans, watches and
+   * stops its own crew. Another workspace can have one running at the same time
+   * and neither board shows the other.
+   */
+  workspaceId: string
   onClose: () => void
 }
 
-export default function MissionDashboard({ onRun, onClose }: MissionDashboardProps): ReactElement {
+export default function MissionDashboard({
+  onRun,
+  workspaceId,
+  onClose
+}: MissionDashboardProps): ReactElement {
   const [task, setTask] = useState('')
   const [plan, setPlan] = useState<MissionPlan | null>(null)
   const [edges, setEdges] = useState<MissionEdge[]>([])
@@ -97,13 +109,15 @@ export default function MissionDashboard({ onRun, onClose }: MissionDashboardPro
   // board, not an empty prompt over agents that are visibly working.
   useEffect(() => {
     let cancelled = false
-    void studio.missionState().then((m) => {
-      if (!cancelled && m && m.status === 'running') setLive(m)
+    void studio.missionState(workspaceId).then((m) => {
+      // A finished crew is still worth showing. Coming back to a board reading
+      // 3/3 done is the answer to whether it worked; an empty prompt box is not.
+      if (!cancelled && m) setLive(m)
     })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [workspaceId])
 
   /**
    * Follow the live mission.
@@ -115,10 +129,10 @@ export default function MissionDashboard({ onRun, onClose }: MissionDashboardPro
   useEffect(() => {
     if (!live || live.status !== 'running') return
     const id = setInterval(() => {
-      void studio.missionState().then((m) => m && setLive(m))
+      void studio.missionState(workspaceId).then((m) => m && setLive(m))
     }, POLL_MS)
     return () => clearInterval(id)
-  }, [live])
+  }, [live, workspaceId])
 
   const makePlan = useCallback(async () => {
     const text = task.trim()
@@ -127,7 +141,7 @@ export default function MissionDashboard({ onRun, onClose }: MissionDashboardPro
     setError(null)
     setSkipped([])
     try {
-      const res = await studio.planMission(text)
+      const res = await studio.planMission(text, workspaceId)
       if (!res.ok || !res.plan) {
         setError(res.error ?? 'That could not be planned.')
         setSkipped(res.skipped ?? [])
@@ -141,7 +155,7 @@ export default function MissionDashboard({ onRun, onClose }: MissionDashboardPro
     } finally {
       setPlanning(false)
     }
-  }, [task, planning])
+  }, [task, planning, workspaceId])
 
   const run = useCallback(async () => {
     if (!plan || launching) return
@@ -168,9 +182,9 @@ export default function MissionDashboard({ onRun, onClose }: MissionDashboardPro
   }, [plan, edges, onRun, launching])
 
   const stop = useCallback(async () => {
-    const m = await studio.abortMission()
+    const m = await studio.abortMission(workspaceId)
     setLive(m)
-  }, [])
+  }, [workspaceId])
 
   const reset = useCallback(() => {
     setLive(null)

@@ -18,7 +18,6 @@ Real coding agents on a canvas, wired to each other. Eight LLM specialists worki
 [![Studio](https://img.shields.io/badge/Studio-Real%20Agent%20Canvas-C41E3A?style=for-the-badge&logo=terminal&logoColor=white)](#-studio--the-agent-canvas)
 [![Orchestrator](https://img.shields.io/badge/Orchestrator-8%20Specialists-6E4AFF?style=for-the-badge)](#-orchestrator--eight-specialists-in-parallel)
 [![Desk](https://img.shields.io/badge/Desk-Autonomous%20Inbox-00A67E?style=for-the-badge&logo=gmail&logoColor=white)](#-desk--the-inbox-that-runs-itself)
-[![Edge](https://img.shields.io/badge/Edge-Snapdragon%20X%20Elite-3253DC?style=for-the-badge&logo=qualcomm&logoColor=white)](#edge-first-by-design)
 
 [![Electron](https://img.shields.io/badge/Electron%2041-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org)
 [![React](https://img.shields.io/badge/React%2019-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)

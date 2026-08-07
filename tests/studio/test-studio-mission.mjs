@@ -16,8 +16,10 @@ const ok = (n, c, extra = '') => (c ? PASS.push(n) : FAIL.push(`${n}${extra ? ` 
 
 const {
   MAX_STEPS,
+  MIN_STEPS,
   MissionTracker,
   STALL_AFTER_MS,
+  estimateComplexity,
   missionEdges,
   missionPrompt,
   validateMission,
@@ -26,7 +28,13 @@ const {
 
 const KINDS = ['claude', 'codex', 'gemini', 'shell']
 const V = (raw, over = {}) =>
-  validateMission(raw, { availableKinds: KINDS, task: 'do the thing', id: 'msn_test', ...over })
+  validateMission(raw, {
+    availableKinds: KINDS,
+    task: 'do the thing',
+    id: 'msn_test',
+    workspaceId: 'ws_test',
+    ...over
+  })
 
 // ═══ 1. Validation — the shape ════════════════════════════════════════════
 
@@ -57,8 +65,9 @@ const V = (raw, over = {}) =>
 {
   // The model is allowed to reply with a bare array, as command.ts permits.
   const { plan } = V([{ agentKind: 'shell', brief: 'ls', title: 'T', role: 'Look' }])
-  ok('a bare array is accepted', plan?.steps.length === 1)
+  ok('a bare array is accepted', plan?.steps[0].agentKind === 'shell')
   ok('a missing ref is generated', plan?.steps[0].ref === 's1')
+  ok('the plan carries the workspace it belongs to', plan?.workspaceId === 'ws_test')
 }
 
 ok('no steps means no plan', V({ steps: [] }).plan === null)
@@ -75,7 +84,6 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
       { ref: 'b', agentKind: 'claude', title: 'Y', role: 'Build', brief: 'go' }
     ]
   })
-  ok('an agent that is not installed is dropped', plan?.steps.length === 1)
   ok('the surviving step is the installed one', plan?.steps[0].agentKind === 'claude')
   ok('the drop is explained', skipped.some((s) => s.includes('cursor')), skipped.join('; '))
 }
@@ -87,7 +95,7 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
       { ref: 'b', agentKind: 'claude', title: 'Y', role: 'Build', brief: 'real work' }
     ]
   })
-  ok('a step with no instruction is dropped', plan?.steps.length === 1)
+  ok('a step with no instruction is dropped', plan?.steps[0].brief === 'real work')
   ok('an empty brief is explained', skipped.some((s) => /no instruction/i.test(s)))
 }
 
@@ -174,7 +182,13 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
 {
   const { plan } = V({
     steps: [
-      { ref: 'a', agentKind: 'claude', title: 'x'.repeat(500), role: 'y'.repeat(500), brief: 'z'.repeat(9000) }
+      {
+        ref: 'a',
+        agentKind: 'claude',
+        title: 'x'.repeat(500),
+        role: 'y'.repeat(500),
+        brief: 'z'.repeat(9000)
+      }
     ]
   })
   ok('an over-long title is clamped', plan.steps[0].title.length <= 40)
@@ -478,6 +492,101 @@ const chain = V({
   snap.status = 'done'
   ok('the snapshot is a copy, not the live state', r.tracker.snapshot().steps[0].status === before)
   ok('and the mission status is untouched', r.tracker.snapshot().status === 'running')
+}
+
+
+// ═══ 8. Crew sizing — the system decides, not the user ════════════════════
+
+{
+  const one = V({ steps: [{ ref: 'a', agentKind: 'claude', title: 'A', role: 'Build', brief: 'build it' }] })
+  ok('a one-agent plan is topped up to the floor', one.plan.steps.length === MIN_STEPS)
+  ok('the extra agent reviews rather than builds', /review/i.test(one.plan.steps[1].role))
+  ok('the reviewer waits for the builder', one.plan.steps[1].dependsOn === 'a')
+  ok(
+    'the reviewer is a different agent from the builder',
+    one.plan.steps[1].agentKind !== one.plan.steps[0].agentKind
+  )
+  ok('claude builds, codex checks', one.plan.steps[1].agentKind === 'codex')
+  ok('the top-up carries a real brief', one.plan.steps[1].brief.length > 40)
+  ok('the brief names the actual request', one.plan.steps[1].brief.includes('do the thing'))
+  ok('the top-up is explained', one.skipped.some((x) => /never one agent/i.test(x)))
+}
+
+{
+  // A codex-only plan must not be reviewed by another codex.
+  const { plan } = V({ steps: [{ ref: 'a', agentKind: 'codex', title: 'A', role: 'Build', brief: 'go' }] })
+  ok('a codex builder gets a non-codex reviewer', plan.steps[1].agentKind !== 'codex')
+}
+
+{
+  // Two or more is the model's considered plan; nothing is added to it.
+  const { plan, skipped } = V({
+    steps: [
+      { ref: 'a', agentKind: 'gemini', title: 'A', role: 'Analyse', brief: 'look' },
+      { ref: 'b', agentKind: 'gemini', title: 'B', role: 'Report', brief: 'write', dependsOn: 'a' }
+    ]
+  })
+  ok('a plan already at the floor is left alone', plan.steps.length === 2)
+  ok('and nothing is reported as added', !skipped.some((x) => /never one agent/i.test(x)))
+}
+
+{
+  // With a single agent installed there is nobody else to add.
+  const { plan } = validateMission(
+    { steps: [{ ref: 'a', agentKind: 'claude', title: 'A', role: 'B', brief: 'go' }] },
+    { availableKinds: ['claude'], task: 't', workspaceId: 'w' }
+  )
+  ok('the only installed agent still reviews its own work', plan.steps.length === MIN_STEPS)
+  ok('because one agent is better than refusing to run', plan.steps[1].agentKind === 'claude')
+}
+
+{
+  const simple = estimateComplexity('make a minimal portfolio site')
+  ok('an explicitly small job is simple', simple.tier === 'simple', simple.tier)
+  ok('and gets the smallest crew', simple.crew.min === MIN_STEPS && simple.crew.max === 3)
+  ok('the reason is stated', simple.signals.some((x) => /scoped small/.test(x)))
+
+  const standard = estimateComplexity('add login with a database table and an api endpoint')
+  ok('several surfaces reads as standard', standard.tier === 'standard', standard.tier)
+  ok('and asks for more hands', standard.crew.min >= 3)
+
+  const complex = estimateComplexity(
+    'refactor the whole backend api, migrate the postgres schema, rebuild the frontend dashboard, ' +
+      'add auth with sessions, write e2e tests and set up the ci pipeline for deploy'
+  )
+  ok('a sweeping job reads as complex', complex.tier === 'complex', complex.tier)
+  ok('and is allowed the full crew', complex.crew.max === MAX_STEPS)
+  ok('heavy verbs are noticed', complex.signals.some((x) => /large-scale/.test(x)))
+
+  ok('an empty request does not throw', estimateComplexity('').tier === 'simple')
+  ok('a null request does not throw', estimateComplexity(null).tier === 'simple')
+  ok(
+    'the crew floor is never below the minimum',
+    ['simple', 'standard', 'complex'].every(
+      () => estimateComplexity('anything').crew.min >= MIN_STEPS
+    )
+  )
+}
+
+{
+  const p = missionPrompt('rebuild the api', ['claude', 'codex'])
+  ok('the prompt states the measured complexity', /COMPLEXITY/.test(p))
+  ok('the prompt gives a crew range', /aim for \d+.\d+ agents/.test(p))
+  ok('the system prompt forbids a crew of one', /NEVER fewer than 2/.test(MISSION_SYSTEM))
+  ok('the system prompt names the default pairing', /ONE claude to build and ONE codex/.test(MISSION_SYSTEM))
+  ok('the system prompt warns against duplicate work', /duplicating a job/.test(MISSION_SYSTEM))
+}
+
+{
+  // Workspace scoping: the tracker knows which canvas it belongs to, and which
+  // nodes are its own. Both are what stop one workspace's board leaking into
+  // another's Dashboard.
+  const r = rig(chain)
+  ok('the tracker reports its workspace', r.tracker.workspaceId === 'ws_test')
+  ok('the snapshot carries it too', r.tracker.snapshot().workspaceId === 'ws_test')
+  ok('a node of its own is owned', r.tracker.owns(r.node('a')) === true)
+  ok('a node from another canvas is not', r.tracker.owns('node_somewhere_else') === false)
+  ok('status is readable without a snapshot', r.tracker.status === 'running')
 }
 
 // ═══ Report ═══════════════════════════════════════════════════════════════

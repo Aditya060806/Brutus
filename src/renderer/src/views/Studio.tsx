@@ -1393,11 +1393,21 @@ function StudioCanvas({
    * showing a dead terminal is worse than one offering to start again.
    */
   const stopEverything = useCallback(async () => {
-    studio.cancelRouting()
-    await studio.stopAll()
-
     // Read and tear down off the ref, so the updater below stays pure.
     const current = nodesRef.current
+
+    /**
+     * Scoped to this canvas's own nodes.
+     *
+     * Another workspace can have a crew running right now — that is the point of
+     * agents outliving the view — and the button says "in this workspace". Main
+     * cannot work out the scope itself, because a session knows its node and not
+     * its workspace, so the canvas is what supplies it.
+     */
+    await studio.stopAll(
+      workspaceId,
+      current.filter(isAgent).map((n) => n.id)
+    )
     for (const n of current) {
       if (isAgent(n) && n.data.sessionId) destroyTerminal(n.data.sessionId)
       if (isAgent(n)) studio.forgetPreview(n.id)
@@ -1416,7 +1426,7 @@ function StudioCanvas({
         )
     )
     setEdges((es) => es.filter((e) => !previews.has(e.source) && !previews.has(e.target)))
-  }, [])
+  }, [workspaceId])
 
   return (
     <LiveNodesContext.Provider value={liveNodes}>
@@ -1590,7 +1600,11 @@ function StudioCanvas({
         <div className="pointer-events-none absolute inset-x-0 top-16 z-40 flex justify-center px-4">
           <AnimatePresence>
             {dashboardOpen && (
-              <MissionDashboard onRun={runMission} onClose={() => setDashboardOpen(false)} />
+              <MissionDashboard
+                onRun={runMission}
+                workspaceId={workspaceId}
+                onClose={() => setDashboardOpen(false)}
+              />
             )}
           </AnimatePresence>
         </div>
