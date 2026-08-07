@@ -1,0 +1,280 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   BRUTUS design tokens — the single source of truth for every colour, shadow
+   and easing in the renderer.
+   ════════════════════════════════════════════════════════════════════════════
+
+   ── HOW THIS FILE IS STRUCTURED ────────────────────────────────────────────
+   Two blocks, and the separation is the whole point:
+
+     1. `:root` holds the RAW palette as plain custom properties. This is the
+        layer a theme swaps. Nothing here knows about Tailwind.
+
+     2. `@theme inline` BINDS those raw values to Tailwind utility names, so
+        `bg-surface`, `text-content` and `border-line` exist as real classes.
+
+   ── WHY `inline` ───────────────────────────────────────────────────────────
+   Without it Tailwind emits `.bg-surface { background-color: var(--color-surface) }`
+   and resolves `--color-surface` once, at build time. Any later redefinition of
+   the raw var — which is exactly how the accent picker works — would then do
+   nothing, silently. `inline` makes the utility reference `var(--brutus-…)`
+   directly, so a runtime swap actually repaints. This is the documented Tailwind
+   v4 idiom for var-backed themes and it is not optional here.
+
+   ── WHY THE `zinc-*` / `red-*` REMAP AT THE BOTTOM ─────────────────────────
+   54 of the 62 renderer components paint themselves with hardcoded `zinc-*` and
+   `red-*` utilities — roughly 1400 call sites. Tailwind v4 ships those shades as
+   its own `@theme` variables (see `node_modules/tailwindcss/theme.css`:
+   `--color-red-500: oklch(63.7% 0.237 25.331)`), so redefining them here
+   re-skins every one of those files at once, with no per-file edits and nothing
+   missed. Hand-migrating 1400 call sites would have taken far longer and would
+   certainly have left stragglers in views that are hard to reach at runtime.
+
+   The names do become a slight lie — `red-500` is "the accent", not literally
+   red, if the accent is ever changed. That is a deliberate trade: it buys
+   app-wide coherence for free. NEW code should use the semantic names
+   (`bg-surface`, `text-content`, `bg-primary-500`); the `zinc`/`red` names are a
+   compatibility alias for code that already exists.
+
+   ── WHERE RED IS ALLOWED ───────────────────────────────────────────────────
+   The accent is a signal, not a decoration. Earlier revisions of this UI leaked
+   red into backgrounds, scrollbars, panel borders, card glows and hover states
+   until it stopped meaning anything — when everything is red, "live" does not
+   read as live. The rule now:
+
+     USE the accent for   the live voice link, an active recording or mic,
+                          the single primary action on a surface, a genuine
+                          error, and the active navigation item.
+     DO NOT use it for    backgrounds, scrollbars, resting borders, hover
+                          fills, card shadows, decorative glows, or any state
+                          that is merely "normal".
+
+   The canvas is pure #000 and every surface above it is a true neutral grey.
+   Depth is built from stacked greys and hairlines — never from a coloured wash.
+
+   ── WHAT DOES *NOT* GET REMAPPED ───────────────────────────────────────────
+   `white` and `black` are left alone on purpose. They are used almost entirely
+   as low-alpha overlays (`border-white/5`, `bg-black/40` — 287 and 109 uses),
+   which is the standard glass/scrim technique; tinting them would make every
+   scrim in the app subtly wrong. Solid backgrounds that used to lean on
+   `bg-black` are handled explicitly by the app background layer instead.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Neutral ramp ────────────────────────────────────────────────────────
+     TRUE neutral — every stop is r == g == b. There is no hue anywhere in this
+     ramp, deliberately: a tinted grey next to a saturated accent reads as a
+     colour cast, and on a pitch-black canvas even a 2% violet lean is visible
+     as a haze across the whole app.
+
+     Calibrated against actual usage rather than picked for even steps: the
+     400–600 band carries most of the app's text (130 / 191 / 94 uses
+     respectively), so those three are tuned for legibility on black first and
+     ramp evenness second. */
+  --brutus-neutral-50: #fafafa;
+  --brutus-neutral-100: #ededed; /* primary text */
+  --brutus-neutral-200: #d4d4d4;
+  --brutus-neutral-300: #b0b0b0;
+  --brutus-neutral-400: #8a8a8a; /* secondary text */
+  --brutus-neutral-500: #6b6b6b; /* muted text — the single most used shade */
+  --brutus-neutral-600: #525252; /* faint text */
+  --brutus-neutral-700: #2e2e2e; /* strong divider */
+  --brutus-neutral-800: #1f1f1f; /* hairline border */
+  --brutus-neutral-900: #0d0d0d; /* card / panel surface */
+  --brutus-neutral-950: #050505; /* deepest recess above true black */
+
+  /* ── Accent ramp ─────────────────────────────────────────────────────────
+     Brutus red, refined. The old palette was a single flat `#ef4444` used for
+     everything from 8px status dots to full-bleed glows, which is why the app
+     read as one loud note. This is a real 50–950 ramp: deep shades for fills
+     and borders, light shades for text on tinted backgrounds.
+
+     Swapping these six lines is all an accent change requires — every
+     `red-*` and `primary-*` utility in the app follows. */
+  --brutus-accent-50: #fef3f2;
+  --brutus-accent-100: #fee4e2;
+  --brutus-accent-200: #fecdca;
+  --brutus-accent-300: #fda29b;
+  --brutus-accent-400: #f97066;
+  --brutus-accent-500: #f04438; /* the accent */
+  --brutus-accent-600: #d92d20;
+  --brutus-accent-700: #b42318;
+  --brutus-accent-800: #912018;
+  --brutus-accent-900: #7a271a;
+  --brutus-accent-950: #55160c;
+
+  /* Accent as raw channels, for the places that need a bare triple rather than
+     a hex — CSS gradients, box-shadow glows and the scrollbar, none of which
+     can take a hex through a Tailwind alpha modifier.
+
+     Two forms, and both are needed:
+       --brutus-accent-rgb    space-separated, for `rgb(… / 0.2)` in plain CSS
+       --brutus-accent-c      comma-separated, for `rgba(…, 0.2)` inside a
+                              Tailwind arbitrary value such as
+                              `shadow-[0_0_20px_rgba(var(--brutus-accent-c),0.2)]`
+     The comma form exists because Tailwind treats a `/` in an arbitrary value
+     as the start of an opacity modifier, which mangles the slash syntax; and
+     because arbitrary values may not contain spaces. */
+  --brutus-accent-rgb: 240 68 56;
+  --brutus-accent-c: 240, 68, 56;
+
+  /* ── Status ramps ────────────────────────────────────────────────────────
+     Kept narrow on purpose: only the shades actually needed to render a
+     success / warning / danger state on a dark surface. A full 50–950 for each
+     would be 33 more tokens nobody reads. */
+  --brutus-sage-300: #86efac;
+  --brutus-sage-400: #4ade80;
+  --brutus-sage-500: #34c759;
+  --brutus-sage-600: #16a34a;
+
+  --brutus-amber-300: #fcd34d;
+  --brutus-amber-400: #fbbf24;
+  --brutus-amber-500: #e8a728;
+  --brutus-amber-600: #d97706;
+
+  --brutus-coral-300: #fca5a5;
+  --brutus-coral-400: #f87171;
+  --brutus-coral-500: #ef4444;
+  --brutus-coral-600: #dc2626;
+
+  /* ── Semantic surfaces ───────────────────────────────────────────────────
+     Named for their role, not their lightness, so a panel that needs to sit
+     above a card asks for `elevated` rather than guessing at `zinc-800`.
+
+     The canvas is TRUE black — #000, not a near-black. On an OLED or a good
+     panel that is an actual absence of light, and every surface above it reads
+     as genuinely floating rather than as a slightly lighter rectangle on a
+     slightly darker one. Depth here comes from stacked greys and hairlines,
+     never from a coloured wash. */
+  --brutus-canvas: #000000; /* the void behind everything */
+  --brutus-surface: var(--brutus-neutral-900); /* cards, panels, rows */
+  --brutus-surface-muted: var(--brutus-neutral-950); /* inputs, recessed wells */
+  --brutus-elevated: #141414; /* modals, popovers, dropdowns */
+  --brutus-hover: #1c1c1c; /* hover fill on an elevated surface */
+
+  --brutus-content: var(--brutus-neutral-100); /* primary text */
+  --brutus-content-secondary: var(--brutus-neutral-400);
+  --brutus-content-muted: var(--brutus-neutral-500);
+  --brutus-content-faint: var(--brutus-neutral-600);
+
+  --brutus-line: var(--brutus-neutral-800);
+  --brutus-line-strong: var(--brutus-neutral-700);
+  --brutus-line-subtle: #141414;
+
+  /* ── Elevation ───────────────────────────────────────────────────────────
+     On a PURE-black canvas a drop shadow is close to invisible — there is
+     nothing darker for it to cast onto. So elevation is carried mainly by a
+     1px inset top highlight, the light-catching edge of a raised surface, and
+     the shadow only does real work where one surface overlaps another. */
+  --brutus-shadow-sm: inset 0 1px 0 0 rgb(255 255 255 / 0.03);
+  --brutus-shadow-md: 0 4px 16px rgb(0 0 0 / 0.6), inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+  --brutus-shadow-lg: 0 16px 40px rgb(0 0 0 / 0.7), inset 0 1px 0 0 rgb(255 255 255 / 0.05);
+  --brutus-shadow-xl: 0 32px 80px rgb(0 0 0 / 0.8), inset 0 1px 0 0 rgb(255 255 255 / 0.06);
+  /* Reserved for live-state affordances only — see "where red is allowed". */
+  --brutus-shadow-glow: 0 0 28px rgb(var(--brutus-accent-rgb) / 0.35);
+
+  /* ── Motion ──────────────────────────────────────────────────────────────
+     Three easings and three durations, so timing is a decision made once here
+     rather than re-guessed as a magic number in every component. */
+  --brutus-ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* entrances */
+  --brutus-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* state changes */
+  --brutus-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* affordances */
+  --brutus-duration-fast: 150ms;
+  --brutus-duration-normal: 250ms;
+  --brutus-duration-slow: 400ms;
+}
+
+@theme inline {
+  /* ── Semantic scale — what new code should reach for ─────────────────── */
+  --color-canvas: var(--brutus-canvas);
+  --color-surface: var(--brutus-surface);
+  --color-surface-muted: var(--brutus-surface-muted);
+  --color-elevated: var(--brutus-elevated);
+  --color-hover: var(--brutus-hover);
+
+  --color-content: var(--brutus-content);
+  --color-content-secondary: var(--brutus-content-secondary);
+  --color-content-muted: var(--brutus-content-muted);
+  --color-content-faint: var(--brutus-content-faint);
+
+  --color-line: var(--brutus-line);
+  --color-line-strong: var(--brutus-line-strong);
+  --color-line-subtle: var(--brutus-line-subtle);
+
+  --color-primary-50: var(--brutus-accent-50);
+  --color-primary-100: var(--brutus-accent-100);
+  --color-primary-200: var(--brutus-accent-200);
+  --color-primary-300: var(--brutus-accent-300);
+  --color-primary-400: var(--brutus-accent-400);
+  --color-primary-500: var(--brutus-accent-500);
+  --color-primary-600: var(--brutus-accent-600);
+  --color-primary-700: var(--brutus-accent-700);
+  --color-primary-800: var(--brutus-accent-800);
+  --color-primary-900: var(--brutus-accent-900);
+  --color-primary-950: var(--brutus-accent-950);
+
+  --color-sage-300: var(--brutus-sage-300);
+  --color-sage-400: var(--brutus-sage-400);
+  --color-sage-500: var(--brutus-sage-500);
+  --color-sage-600: var(--brutus-sage-600);
+
+  /* Amber overrides Tailwind's built-in rather than adding a new name, because
+     `amber-*` is already used in a few views — one amber, not two. */
+  --color-amber-300: var(--brutus-amber-300);
+  --color-amber-400: var(--brutus-amber-400);
+  --color-amber-500: var(--brutus-amber-500);
+  --color-amber-600: var(--brutus-amber-600);
+
+  --color-coral-300: var(--brutus-coral-300);
+  --color-coral-400: var(--brutus-coral-400);
+  --color-coral-500: var(--brutus-coral-500);
+  --color-coral-600: var(--brutus-coral-600);
+
+  /* ── Compatibility remap — see the header ────────────────────────────────
+     Everything below re-points a Tailwind built-in at the palette above. It
+     exists so the ~1400 existing `zinc-*` / `red-*` call sites inherit the new
+     design system without being edited. */
+  --color-zinc-50: var(--brutus-neutral-50);
+  --color-zinc-100: var(--brutus-neutral-100);
+  --color-zinc-200: var(--brutus-neutral-200);
+  --color-zinc-300: var(--brutus-neutral-300);
+  --color-zinc-400: var(--brutus-neutral-400);
+  --color-zinc-500: var(--brutus-neutral-500);
+  --color-zinc-600: var(--brutus-neutral-600);
+  --color-zinc-700: var(--brutus-neutral-700);
+  --color-zinc-800: var(--brutus-neutral-800);
+  --color-zinc-900: var(--brutus-neutral-900);
+  --color-zinc-950: var(--brutus-neutral-950);
+
+  /* `neutral` and `stone` are used in a few stragglers; point them at the same
+     ramp so a stray `bg-neutral-900` cannot introduce a second grey. */
+  --color-neutral-100: var(--brutus-neutral-100);
+  --color-neutral-400: var(--brutus-neutral-400);
+  --color-neutral-500: var(--brutus-neutral-500);
+  --color-neutral-700: var(--brutus-neutral-700);
+  --color-neutral-800: var(--brutus-neutral-800);
+  --color-neutral-900: var(--brutus-neutral-900);
+  --color-neutral-950: var(--brutus-neutral-950);
+
+  --color-red-50: var(--brutus-accent-50);
+  --color-red-100: var(--brutus-accent-100);
+  --color-red-200: var(--brutus-accent-200);
+  --color-red-300: var(--brutus-accent-300);
+  --color-red-400: var(--brutus-accent-400);
+  --color-red-500: var(--brutus-accent-500);
+  --color-red-600: var(--brutus-accent-600);
+  --color-red-700: var(--brutus-accent-700);
+  --color-red-800: var(--brutus-accent-800);
+  --color-red-900: var(--brutus-accent-900);
+  --color-red-950: var(--brutus-accent-950);
+
+  /* ── Non-colour tokens ───────────────────────────────────────────────── */
+  --shadow-sm: var(--brutus-shadow-sm);
+  --shadow-md: var(--brutus-shadow-md);
+  --shadow-lg: var(--brutus-shadow-lg);
+  --shadow-xl: var(--brutus-shadow-xl);
+  --shadow-glow: var(--brutus-shadow-glow);
+
+  --ease-out-brutus: var(--brutus-ease-out);
+  --ease-in-out-brutus: var(--brutus-ease-in-out);
+  --ease-spring: var(--brutus-ease-spring);
+}

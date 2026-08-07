@@ -1,0 +1,496 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/* ── Typography ──────────────────────────────────────────────────────────────
+   No webfont downloads: this is a desktop app that must render correctly
+   offline and under a strict CSP, and a CDN font would flash-swap on every
+   launch. Instead we pick the best faces already present on the platform.
+
+   Segoe UI Variable is Windows 11's modern text face and is genuinely well
+   drawn; Cascadia Code ships with Windows Terminal and is a far better mono
+   than Consolas. Each stack degrades cleanly on machines without them. */
+@theme {
+  --font-sans:
+    'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+  width: 100%;
+  font-family: var(--font-sans);
+  /* Crisper stems on dark backgrounds, which this UI is entirely made of. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis-weight: none;
+}
+
+/* Numbers that change in place (timers, counters, telemetry) must not reflow
+   the layout as digits change width. */
+.font-mono,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings:
+    'tnum' 1,
+    'zero' 1;
+}
+
+@keyframes scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ── Brutus dashboard motion primitives (GPU-only: transform/opacity) ── */
+@keyframes brutus-aura-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes brutus-pulse-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes brutus-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+/* Wrong-PIN feedback. A shake says "that was rejected" without a text label
+   that would linger on screen after the field has been cleared. */
+@keyframes brutus-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-5px);
+  }
+  40%,
+  80% {
+    transform: translateX(5px);
+  }
+}
+
+.brutus-shake {
+  animation: brutus-shake 0.4s var(--brutus-ease-in-out);
+}
+
+@keyframes brutus-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Entrance utilities (self-contained tailwindcss-animate subset) ──
+   These class names are used in 21+ components but Tailwind v4 ships no
+   `animate-in` plugin, so they were silently dead. Implemented here with the
+   same CSS-variable composition model so `animate-in fade-in zoom-in ...`
+   combinations work. Runs once on mount — no perf/re-render cost. */
+@keyframes brutus-enter {
+  from {
+    opacity: var(--brutus-enter-opacity, 1);
+    transform: translate3d(var(--brutus-enter-x, 0), var(--brutus-enter-y, 0), 0)
+      scale3d(var(--brutus-enter-scale, 1), var(--brutus-enter-scale, 1), 1);
+  }
+}
+
+.animate-in {
+  animation-name: brutus-enter;
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+  will-change: transform, opacity;
+}
+
+.fade-in {
+  --brutus-enter-opacity: 0;
+}
+.zoom-in {
+  --brutus-enter-scale: 0.95;
+}
+.zoom-in-50 {
+  --brutus-enter-scale: 0.5;
+}
+.slide-in-from-bottom-2 {
+  --brutus-enter-y: 0.5rem;
+}
+.slide-in-from-bottom-4 {
+  --brutus-enter-y: 1rem;
+}
+.slide-in-from-right-8 {
+  --brutus-enter-x: 2rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none;
+  }
+}
+
+/* Shared widget close-button affordance — consistent hover across every widget.
+   Add `brutus-close` to a close button for a uniform red-tinted, rotating hover. */
+.brutus-close {
+  transition:
+    color var(--brutus-duration-normal) ease,
+    background-color var(--brutus-duration-normal) ease,
+    transform var(--brutus-duration-normal) var(--brutus-ease-spring);
+}
+/* Neutral, not red. Dismissing a panel is not a destructive act, and tinting
+   every close button made the accent read as "chrome" rather than "attention". */
+.brutus-close:hover {
+  color: var(--brutus-content);
+  background-color: var(--brutus-hover);
+  transform: rotate(90deg);
+}
+
+/* Reusable hover-lift for interactive cards/tiles */
+.brutus-lift {
+  transition:
+    transform var(--brutus-duration-slow) var(--brutus-ease-out),
+    box-shadow var(--brutus-duration-slow) var(--brutus-ease-out),
+    border-color var(--brutus-duration-slow) var(--brutus-ease-out);
+}
+.brutus-lift:hover {
+  transform: translateY(-2px);
+  /* Neutral, not accent-tinted. A red glow on every hoverable card was the
+     single biggest reason the accent stopped meaning anything. */
+  border-color: var(--brutus-line-strong);
+  box-shadow: var(--brutus-shadow-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brutus-close:hover,
+  .brutus-lift:hover {
+    transform: none;
+  }
+}
+
+/* Rotating conic halo behind the core sphere while the link is live.
+   This is now the ONLY large accent-coloured element in the app, which is what
+   makes it read instantly as "the session is live" rather than as decoration.
+   It exists only while `isSystemActive`. */
+.brutus-aura {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgb(var(--brutus-accent-rgb) / 0.34) 60deg,
+    transparent 150deg,
+    rgb(var(--brutus-accent-rgb) / 0.18) 230deg,
+    transparent 330deg
+  );
+  animation: brutus-aura-spin 18s linear infinite;
+  will-change: transform;
+}
+
+/* Expanding concentric rings around the active call button */
+.brutus-ring {
+  animation: brutus-pulse-ring 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  will-change: transform, opacity;
+}
+
+/* Travelling light sweep for hardware/telemetry bars */
+.brutus-bar-sheen {
+  animation: brutus-shimmer 2.6s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brutus-aura,
+  .brutus-ring,
+  .brutus-bar-sheen {
+    animation: none;
+  }
+}
+
+/* ── BRUTUS Studio canvas scenery ──────────────────────────────────────────
+   The canvas sits under a graph of live terminals, so every layer here is
+   isolated onto its own compositor layer and animated with transform/opacity
+   only. Nothing below repaints while the graph pans. */
+
+.studio-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  contain: strict;
+}
+
+/* Slow drifting colour blooms. Oversized and centred so the transform never
+   exposes an edge as it moves. */
+.studio-bloom {
+  top: -25%;
+  left: -25%;
+  width: 150%;
+  height: 150%;
+  animation: studio-drift 42s ease-in-out infinite alternate;
+  will-change: transform;
+  filter: blur(12px);
+}
+
+@keyframes studio-drift {
+  0% {
+    transform: translate3d(-2%, -1.5%, 0) scale(1.04);
+  }
+  50% {
+    transform: translate3d(2.5%, 1.5%, 0) scale(1.09);
+  }
+  100% {
+    transform: translate3d(-1%, 2%, 0) scale(1.05);
+  }
+}
+
+/* Fine grain. Without it the gradients read as flat CSS; with it the canvas
+   picks up the texture of a real surface. Generated rather than shipped as an
+   asset, so it costs one data URI and no network. */
+.studio-grain {
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Darkened corners so floating windows read against the scene. */
+.studio-vignette {
+  background:
+    radial-gradient(ellipse 75% 65% at 50% 45%, transparent 40%, rgba(0, 0, 0, 0.55) 100%),
+    linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.35) 0%,
+      transparent 18%,
+      transparent 82%,
+      rgba(0, 0, 0, 0.45) 100%
+    );
+}
+
+/* Glass used by the dock, pills and inspector. One definition so every floating
+   surface in Studio has the same material. */
+.studio-glass {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--brutus-elevated) 82%, transparent),
+    color-mix(in srgb, var(--brutus-canvas) 88%, transparent)
+  );
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid rgb(255 255 255 / 0.09);
+  box-shadow: var(--brutus-shadow-lg);
+}
+
+/* A node that is actively working gets a breathing bloom, so you can tell at a
+   glance which agent is busy without reading any text. */
+.studio-busy-glow {
+  animation: studio-breathe 2.8s ease-in-out infinite;
+  will-change: opacity;
+}
+
+@keyframes studio-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-bloom,
+  .studio-busy-glow {
+    animation: none;
+  }
+}
+
+/* ── Agent terminals ────────────────────────────────────────────────────────
+   The terminal is the content of an agent window, so it gets breathing room on
+   the left where text starts and a scrollbar that reads as chrome rather than
+   as part of the output. xterm renders its own viewport, so these have to be
+   targeted rather than handled by `.scrollbar-small`. */
+.studio-term {
+  height: 100%;
+  width: 100%;
+  padding: 6px 2px 4px 8px;
+}
+
+.studio-term .xterm {
+  height: 100%;
+}
+
+.studio-term .xterm-viewport {
+  background: transparent !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+}
+
+.studio-term .xterm-viewport::-webkit-scrollbar {
+  width: 7px;
+}
+
+.studio-term .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.studio-term .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.11);
+  border-radius: 999px;
+  /* Keeps the thumb off the very edge of the rounded window. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.studio-term .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.22);
+  background-clip: content-box;
+}
+
+/* ── Edge labels ────────────────────────────────────────────────────────────
+   A label sits at the midpoint of a curve, which on a tight canvas is often
+   directly between two windows. Without an opaque plate behind it the text
+   collided with whatever was underneath and read as truncated. */
+.react-flow__edge-textwrapper .react-flow__edge-textbg {
+  fill: rgb(9 9 11 / 0.92);
+}
+
+.react-flow__edge-text {
+  fill: var(--brutus-neutral-300, #d4d4d8);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* The tether to a preview window is scenery, not wiring: never let it catch
+   clicks meant for the canvas or the windows it runs between. */
+.react-flow__edge.studio-tether {
+  pointer-events: none;
+}
+
+/* ── Window resizing ────────────────────────────────────────────────────────
+   A terminal is the one thing on this canvas whose useful size depends entirely
+   on what it is running, so windows are resizable. Styled here rather than by
+   importing the resizer package's stylesheet, so the handles match Studio and
+   stay invisible until a window is selected. */
+.react-flow__resize-control.line {
+  border-color: rgb(var(--brutus-accent-c) / 0.45);
+  border-width: 1px;
+}
+
+.react-flow__resize-control.handle {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--brutus-canvas, #09090b);
+  border: 1.5px solid rgb(var(--brutus-accent-c) / 0.7);
+  opacity: 0.9;
+}
+
+.react-flow__resize-control.handle:hover {
+  opacity: 1;
+  transform: scale(1.18);
+}
+
+/* ── User-chosen reduced motion ──────────────────────────────────────────────
+   The OS-level `prefers-reduced-motion` blocks throughout this file cover the
+   system setting; this covers the in-app toggle in Settings → Appearance.
+
+   Durations are collapsed to ~0 rather than set to `animation: none`, because
+   several entrance animations begin at `opacity: 0` — removing the animation
+   would leave those elements permanently invisible instead of merely still. */
+:root.brutus-reduce-motion *,
+:root.brutus-reduce-motion *::before,
+:root.brutus-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+button,
+input,
+textarea {
+  -webkit-app-region: no-drag;
+}
+
+/* Scrollbars are chrome, not signal — neutral grey, never the accent. */
+.scrollbar-small {
+  scrollbar-color: var(--brutus-neutral-700) transparent;
+  scrollbar-width: thin;
+}
+
+.scrollbar-small::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-small::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-small::-webkit-scrollbar-thumb {
+  background: var(--brutus-neutral-800);
+  border-radius: 9999px;
+}
+
+.scrollbar-small::-webkit-scrollbar-thumb:hover {
+  background: var(--brutus-neutral-700);
+}
+
+.react-flow__controls {
+  background-color: var(--brutus-surface) !important;
+  border: 1px solid var(--brutus-line) !important;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--brutus-shadow-md);
+}
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--brutus-line) !important;
+  fill: var(--brutus-content-muted) !important;
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+
+.react-flow__controls-button:hover {
+  background-color: var(--brutus-hover) !important;
+}
+
+.react-flow__controls-button svg:hover {
+  fill: var(--brutus-content-secondary) !important;
+}
