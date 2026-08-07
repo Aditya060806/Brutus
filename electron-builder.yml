@@ -1,0 +1,88 @@
+appId: com.electron.app
+productName: brutus-ai
+protocols:
+  - name: brutus-oauth
+    schemes:
+      - brutus
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,credentials.json}'
+asarUnpack:
+  - resources/**
+  # ── Native binaries ──
+  # A `.node` addon cannot be dlopen'ed from inside an ASAR archive — Node needs
+  # a real file on disk. electron-builder usually detects these, but the voice
+  # feature depends on them absolutely, so they are named explicitly rather than
+  # left to inference.
+  # `**/` because these are present both hoisted at the top level and nested
+  # under @xenova/transformers, and it is the nested copy Transformers.js loads.
+  - '**/node_modules/onnxruntime-node/bin/**'
+  - '**/node_modules/sharp/**'
+
+# ── Bundled models ──
+# Shipped beside the app (NOT inside the ASAR) and read at runtime through
+# `bundledModelsDir()` in src/main/services/voice/model-store.ts.
+#
+# The speech models live here rather than being downloaded on first use so that
+# on-device voice — a privacy feature — never requires a network round-trip
+# before it can be used offline. The optional language model is deliberately NOT
+# here: it is ~1 GB and downloads on demand into userData.
+extraResources:
+  - from: resources/models
+    to: models
+    filter:
+      - '**/*'
+
+win:
+  executableName: brutus-ai
+  icon: build/icon.ico 
+  target:
+    - target: nsis
+    - target: msi
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  runAfterFinish: true
+
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    - NSCameraUsageDescription: Application requests access to the device's camera.
+    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
+    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
+    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+  notarize: false
+dmg:
+  artifactName: ${name}-${version}.${ext}
+
+linux:
+  target:
+    - AppImage
+    - snap
+    - deb
+  maintainer: Aditya Pandey
+  category: Utility
+appImage:
+  artifactName: ${name}-${version}.${ext}
+
+npmRebuild: false
+publish:
+  provider: github
+  owner: Aditya060806
+  repo: Brutus
