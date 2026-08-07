@@ -28,11 +28,11 @@ Real coding agents on a canvas, wired to each other. Eight LLM specialists worki
 
 <br/>
 
-**[Demo video](https://drive.google.com/file/d/1iEQ8_0RgrJ_upc7SoQQ_h8_tGQfKDFlC/view?usp=drive_link)**
+**[Demo video](https://drive.google.com/file/d/1Cd8357n9vBrOz9g8-Zq4wTWyxMtUJwc4/view?usp=sharing)**
 ·
 **[Presentation](https://drive.google.com/file/d/10COwSTOePot8Zara3cNQorNXDBU2ZgEv/view?usp=drive_link)**
 ·
-**[Mobile app](https://github.com/Aditya060806/Brutus-app)**
+**[Mobile app](https://drive.google.com/file/d/1Kx65uAB4ZQd_GtXpthFN1rXMXsq0oIMh/view?usp=sharing)**
 ·
 **[Brain Node server](https://github.com/Aditya060806/Ai-Qualcom-backend)**
 

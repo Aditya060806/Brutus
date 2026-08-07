@@ -52,6 +52,17 @@ import { sanitizeForTerminal } from './router'
  * subscription and possibly a git worktree. Six is already a lot of machine.
  */
 export const MAX_STEPS = 6
+/**
+ * Agents every mission gets, however small the request looks.
+ *
+ * One agent is not a crew — it is the CLI the user could have opened himself,
+ * with extra steps. The floor exists because the whole promise of the Dashboard
+ * is that somebody builds and somebody else checks, and a single terminal
+ * marking its own homework is the failure mode that makes multi-agent work
+ * pointless. The user never asks for a count; this is the guarantee underneath
+ * that.
+ */
+export const MIN_STEPS = 2
 export const MAX_BRIEF_CHARS = 1500
 export const MAX_TITLE_CHARS = 40
 export const MAX_ROLE_CHARS = 40
@@ -82,11 +93,22 @@ export interface MissionStep {
 
 export interface MissionPlan {
   id: string
+  /**
+   * The canvas this crew belongs to.
+   *
+   * Agents outlive the workspace being closed, so more than one workspace can
+   * have a crew working at the same time. Without this the Dashboard in one
+   * workspace would show the board of whichever mission started last, wherever
+   * it was running.
+   */
+  workspaceId: string
   /** What the human asked, verbatim. Never model-rewritten. */
   task: string
   /** The planner's own restatement, shown so a wrong reading is visible early. */
   summary: string
   steps: MissionStep[]
+  /** How hard the request was judged to be, and what that bought it. */
+  complexity: ComplexityTier
 }
 
 export interface MissionStepState extends MissionStep {
@@ -115,6 +137,109 @@ export interface MissionState {
   steps: MissionStepState[]
   /** Counts the dashboard shows without recomputing them. */
   totals: { total: number; done: number; running: number; failed: number; blocked: number }
+}
+
+// ─── How big a crew does this deserve? ──────────────────────────────────────
+
+export type ComplexityTier = 'simple' | 'standard' | 'complex'
+
+export interface ComplexityEstimate {
+  tier: ComplexityTier
+  score: number
+  /** Crew size the planner is told to aim for. */
+  crew: { min: number; max: number }
+  /** What was spotted in the request. Shown to the model so it can disagree. */
+  signals: string[]
+}
+
+/**
+ * Distinct areas of work the request touches.
+ *
+ * Counting *surfaces* rather than words is what separates "add a login button"
+ * from "add login" — the second implies a form, an endpoint, a session and a
+ * migration, which is genuinely more agents' worth of work even though it is a
+ * shorter sentence.
+ */
+const SURFACES: [string, RegExp][] = [
+  ['frontend', /\b(ui|front[- ]?end|page|screen|component|css|styl(e|ing)|layout|site|website|portfolio|landing|dashboard)\b/i],
+  ['backend', /\b(back[- ]?end|api|server|endpoint|route|handler|microservice)\b/i],
+  ['database', /\b(database|db|schema|migration|sql|postgres|mongo|prisma|table)\b/i],
+  ['auth', /\b(auth|login|signup|sign[- ]?in|oauth|session|jwt|permission|role)\b/i],
+  ['tests', /\b(test|tests|testing|spec|coverage|e2e|unit test)\b/i],
+  ['deploy', /\b(deploy|ci\/?cd|pipeline|docker|kubernetes|k8s|release|publish)\b/i],
+  ['docs', /\b(readme|docs|documentation|changelog)\b/i],
+  ['mobile', /\b(mobile|android|ios|react[- ]?native|flutter)\b/i],
+  ['data', /\b(scrape|scraping|etl|pipeline|analytics|report|chart|graph)\b/i]
+]
+
+/** Verbs that mean "touch a lot of files", not "write one function". */
+const HEAVY = /\b(refactor|rewrite|migrate|re[- ]?architect|redesign|overhaul|integrate|optimi[sz]e|scale|modernis|port\b|convert)\b/i
+
+/** Words that say plainly this is meant to be small. */
+const SMALL = /\b(minimal|simple|small|quick|tiny|basic|just|only|single|one[- ]page|barebones|prototype)\b/i
+
+/**
+ * Judge how much machinery a request is worth.
+ *
+ * Deliberately deterministic and boring. The model still designs the crew — this
+ * only sets the size bracket it is asked to work within, and having that bracket
+ * come from something inspectable means "why did it open five terminals?" has an
+ * answer that is not "the model felt like it".
+ *
+ * Pure, so every rule here is a test rather than an intuition.
+ */
+export function estimateComplexity(task: string): ComplexityEstimate {
+  const text = String(task ?? '')
+  const signals: string[] = []
+  let score = 0
+
+  const surfaces = SURFACES.filter(([, re]) => re.test(text)).map(([name]) => name)
+  if (surfaces.length) {
+    // The first surface is the job existing at all; each extra one is breadth.
+    score += surfaces.length - 1
+    signals.push(`touches ${surfaces.join(', ')}`)
+  }
+
+  if (HEAVY.test(text)) {
+    score += 2
+    signals.push('involves large-scale change')
+  }
+
+  // Several sentences, or a list, usually means several deliverables.
+  const clauses = text.split(/[.;\n]|\band\b|,/i).filter((c) => c.trim().length > 12).length
+  if (clauses >= 3) {
+    score += 1
+    signals.push(`${clauses} separate asks`)
+  }
+
+  if (text.length > 260) {
+    score += 1
+    signals.push('long, detailed request')
+  }
+
+  /**
+   * An explicit "minimal" outranks the keyword count.
+   *
+   * "Build a minimal portfolio site" trips the frontend surface and would
+   * otherwise creep upward; the user said small, and ignoring that to open more
+   * terminals is both wrong and expensive.
+   */
+  if (SMALL.test(text)) {
+    score -= 2
+    signals.push('explicitly scoped small')
+  }
+
+  score = Math.max(0, score)
+
+  const tier: ComplexityTier = score <= 1 ? 'simple' : score <= 3 ? 'standard' : 'complex'
+  const crew =
+    tier === 'simple'
+      ? { min: MIN_STEPS, max: 3 }
+      : tier === 'standard'
+        ? { min: 3, max: 4 }
+        : { min: 4, max: MAX_STEPS }
+
+  return { tier, score, crew, signals }
 }
 
 // ─── Planning prompt ────────────────────────────────────────────────────────
