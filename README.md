@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/docs_banner.jpeg" width="900" alt="Brutus AI — the AI orchestration engine"/>
+<img src="assets/docs_banner.jpeg" width="320" alt="Brutus AI — the AI orchestration engine"/>
 
 <br/>
 <br/>
