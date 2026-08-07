@@ -11,7 +11,15 @@ out
 .env.*
 !.env.example
 
+
+# Editor, IDE, and agent config — local to each machine, not shared.
 .idea/
+.vscode/
+.claude/
+
+# GitHub repo metadata (issue/PR templates, Dependabot, funding).
+# NOTE: ignoring this disables those GitHub features for the repo.
+.github/
 
 
 credentials.json
