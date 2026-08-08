@@ -100,6 +100,7 @@ import {
 } from './records'
 import { sampleRecords } from './record-seeds'
 import { buildPacket } from './packet'
+import { buildPacketPdf } from './packet-pdf'
 import { Telemetry, parseLegacyLine } from './telemetry'
 import { getSharedModelRouter } from '../orchestrator'
 import type {
@@ -1578,21 +1579,31 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
    */
   ipcMain.handle(
     'studio-record-export',
-    async (_e, { id, format }: { id?: string; format?: 'md' | 'json' }) => {
+    async (_e, { id, format }: { id?: string; format?: 'md' | 'json' | 'pdf' }) => {
       const record = getRecord(String(id ?? ''))
       if (!record) return { ok: false, error: 'That record no longer exists.' }
 
       const packet = buildPacket(record)
-      const preferred = format === 'json' ? 'json' : 'md'
+      const preferred = format === 'json' ? 'json' : format === 'pdf' ? 'pdf' : 'md'
 
       const win = getWindow()
       const options = {
         title: 'Save review packet',
         defaultPath: `${packet.filename}.${preferred}`,
+        /**
+         * The chosen format leads the list.
+         *
+         * Windows takes the extension from the FIRST filter rather than from
+         * `defaultPath`, so a fixed order silently wrote a `.md` when the user
+         * pressed the PDF button.
+         */
         filters: [
+          { name: 'PDF report', extensions: ['pdf'] },
           { name: 'Markdown', extensions: ['md'] },
           { name: 'JSON', extensions: ['json'] }
-        ]
+        ].sort(
+          (a, b) => Number(b.extensions[0] === preferred) - Number(a.extensions[0] === preferred)
+        )
       }
       const result = win
         ? await dialog.showSaveDialog(win, options)
@@ -1601,8 +1612,16 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
       if (result.canceled || !result.filePath) return { ok: false, canceled: true }
 
       try {
-        const asJson = result.filePath.toLowerCase().endsWith('.json')
-        fs.writeFileSync(result.filePath, asJson ? packet.json : packet.markdown, 'utf8')
+        // The extension decides, so renaming inside the dialog does what it
+        // looks like it does rather than writing markdown into a .pdf.
+        const lower = result.filePath.toLowerCase()
+        if (lower.endsWith('.pdf')) {
+          fs.writeFileSync(result.filePath, await buildPacketPdf(record))
+        } else if (lower.endsWith('.json')) {
+          fs.writeFileSync(result.filePath, packet.json, 'utf8')
+        } else {
+          fs.writeFileSync(result.filePath, packet.markdown, 'utf8')
+        }
         log(`[records] exported a review packet to ${path.basename(result.filePath)}`)
         return { ok: true, path: result.filePath }
       } catch (err) {

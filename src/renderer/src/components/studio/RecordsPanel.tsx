@@ -163,7 +163,7 @@ export default function RecordsPanel({ workspaceId }: RecordsPanelProps): ReactE
     [query]
   )
 
-  const exportPacket = useCallback(async (id: string, format: 'md' | 'json') => {
+  const exportPacket = useCallback(async (id: string, format: 'md' | 'json' | 'pdf') => {
     setBusyExport(id)
     try {
       const saved = await studio.exportRecord(id, format)
@@ -388,7 +388,7 @@ function RecordRow({
   open: boolean
   exporting: boolean
   onToggle: () => void
-  onExport: (format: 'md' | 'json') => void
+  onExport: (format: 'md' | 'json' | 'pdf') => void
   onChanged: () => void
 }): ReactElement {
   const record = hit.record
@@ -562,9 +562,12 @@ function RecordRow({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* PDF leads: it is the one a reviewer can open anywhere, and the
+                only format that carries the branding and pagination. Markdown
+                and JSON stay as quiet siblings for editing and for scripts. */}
             <button
               data-tour="records.export"
-              onClick={() => onExport('md')}
+              onClick={() => onExport('pdf')}
               disabled={exporting}
               className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-red-500/15 px-2.5 py-1.5 text-[10.5px] font-semibold text-red-400 transition-colors hover:bg-red-500/25 disabled:opacity-40"
             >
@@ -573,7 +576,14 @@ function RecordRow({
               ) : (
                 <RiDownload2Line size={12} />
               )}
-              Export review packet
+              Export PDF report
+            </button>
+            <button
+              onClick={() => onExport('md')}
+              disabled={exporting}
+              className="cursor-pointer rounded-lg px-2 py-1.5 text-[10.5px] text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-300 disabled:opacity-40"
+            >
+              as Markdown
             </button>
             <button
               onClick={() => onExport('json')}

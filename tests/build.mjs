@@ -42,6 +42,9 @@ const TARGETS = [
   ['studio/records.ts', 'studio/records.test.cjs'],
   ['studio/packet.ts', 'studio/packet.test.cjs'],
   ['studio/record-seeds.ts', 'studio/record-seeds.test.cjs'],
+  // The PDF renderer plus the samples, so the test can assert that every
+  // demonstration record actually draws.
+  [null, 'studio/pdf.test.cjs', path.join(HERE, 'pdf-entry.ts')],
   // The IPC registrar. Bundled so a test can assert every studio-* channel is
   // registered — this app has twice shipped a view whose only symptom was
   // "No handler registered", and Studio now owns forty of them.

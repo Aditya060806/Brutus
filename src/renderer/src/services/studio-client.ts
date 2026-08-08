@@ -734,7 +734,7 @@ class StudioClient {
   }
 
   /** Build the review packet and save it. Returns the path, or null if cancelled. */
-  async exportRecord(id: string, format: 'md' | 'json' = 'md'): Promise<string | null> {
+  async exportRecord(id: string, format: 'md' | 'json' | 'pdf' = 'pdf'): Promise<string | null> {
     const res = (await window.electron.ipcRenderer.invoke('studio-record-export', {
       id,
       format
