@@ -251,6 +251,79 @@ export type CanvasMutation =
   | { op: 'prompt'; target: string; text: string }
   | { op: 'remove-node'; target: string }
 
+// ── Agent task records ──────────────────────────────────────────────────────
+
+export interface ChecklistItem {
+  id: string
+  label: string
+  hint?: string
+  required: boolean
+  done: boolean
+  value?: string
+  origin: 'derived' | 'user'
+}
+
+export interface TaskSection {
+  ref: string
+  title: string
+  role: string
+  agentKind: AgentKind
+  brief: string
+  status: StepStatus
+  output?: string
+  note?: string
+  startedAt?: number
+  finishedAt?: number
+}
+
+export interface TaskRecord {
+  id: string
+  workspaceId: string
+  task: string
+  summary: string
+  complexity: ComplexityTier
+  createdAt: number
+  finishedAt?: number
+  status: MissionStatus
+  checklist: ChecklistItem[]
+  sections: TaskSection[]
+  notes: string
+  sample?: boolean
+}
+
+/** Where a search term landed, so the UI can highlight rather than only narrow. */
+export interface MatchRange {
+  field: string
+  label: string
+  start: number
+  length: number
+  excerpt: string
+}
+
+export interface RecordHit {
+  record: TaskRecord
+  sections: string[]
+  matches: MatchRange[]
+}
+
+export interface RecordQuery {
+  text?: string
+  section?: string
+  status?: string
+  owner?: string
+  missingDataOnly?: boolean
+  /** Limit to one canvas. Omit, or set `allWorkspaces`, to span everything. */
+  workspaceId?: string
+  allWorkspaces?: boolean
+}
+
+/** The distinct values actually present, so a filter offers only real options. */
+export interface FilterOptions {
+  sections: string[]
+  statuses: string[]
+  owners: string[]
+}
+
 // ── Dashboard mission ───────────────────────────────────────────────────────
 
 export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'blocked'
@@ -265,7 +338,7 @@ export interface MissionStep {
   dependsOn: string | null
 }
 
-export type ComplexityTier = 'simple' | 'standard' | 'complex'
+export type ComplexityTier = 'trivial' | 'simple' | 'standard' | 'complex'
 
 export interface MissionPlan {
   id: string
@@ -332,6 +405,15 @@ export function isLoopbackUrl(raw: unknown): raw is string {
   if (typeof raw !== 'string' || !raw) return false
   try {
     const u = new URL(raw)
+    /**
+     * A page an agent wrote, with no server behind it.
+     *
+     * The smallest and most common job — one static file — starts nothing to
+     * connect to, so there would otherwise be no way to show it. Only main
+     * produces these, and both of its detectors refuse anything resolving
+     * outside the agent's own working directory before it gets here.
+     */
+    if (u.protocol === 'file:') return /\.html?$/i.test(u.pathname)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
     const h = u.hostname.toLowerCase()
     return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1' || h === '0.0.0.0'
@@ -343,10 +425,18 @@ export function isLoopbackUrl(raw: unknown): raw is string {
 /** An agent announced a dev server; the canvas opens a window on it. */
 export interface PreviewEvent {
   sessionId: string
-  /** The agent node that started it, so the window can be placed beside it. */
+  /** The agent node that produced it, so the window can be placed beside it. */
   nodeId: string
   url: string
   port: number
+  /**
+   * A running dev server, or a static file on disk.
+   *
+   * The canvas uses this to rank them: a live server always outranks a file, so
+   * an agent that starts a server and then edits a template keeps the working
+   * preview instead of dropping back to a file:// view of the template.
+   */
+  kind: 'server' | 'file'
 }
 
 type DataListener = (chunk: string) => void
@@ -354,6 +444,7 @@ type StatusListener = (status: SessionStatus, exitCode?: number) => void
 type ApprovalListener = (approval: StudioApproval | null) => void
 type RoutedListener = (event: RoutedEvent) => void
 type PreviewListener = (event: PreviewEvent) => void
+type PreviewChangedListener = (url: string) => void
 
 class StudioClient {
   private dataListeners = new Map<string, Set<DataListener>>()
@@ -363,6 +454,7 @@ class StudioClient {
   private approvalListeners = new Set<ApprovalListener>()
   private routedListeners = new Set<RoutedListener>()
   private previewListeners = new Set<PreviewListener>()
+  private previewChangedListeners = new Set<PreviewChangedListener>()
   private telemetryListeners = new Set<(event: TelemetryEvent) => void>()
   /**
    * The last preview seen per agent node.
@@ -431,12 +523,26 @@ class StudioClient {
             sessionId: ev.sessionId ?? '',
             nodeId: ev.nodeId,
             url: ev.url,
-            port: ev.port ?? 0
+            port: ev.port ?? 0,
+            kind: ev.kind === 'file' ? 'file' : 'server'
           }
+          /**
+           * A file never replaces a server in the replay cache.
+           *
+           * `onPreview` replays the last event per node to a late subscriber, so
+           * without this a workspace reopened after an agent edited a template
+           * would come back showing the file rather than the server that is
+           * still running.
+           */
+          const held = this.lastPreviews.get(preview.nodeId)
+          if (held && held.kind === 'server' && preview.kind === 'file') break
           this.lastPreviews.set(preview.nodeId, preview)
           this.previewListeners.forEach((l) => l(preview))
           break
         }
+        case 'preview-changed':
+          if (ev.url) this.previewChangedListeners.forEach((l) => l(ev.url as string))
+          break
         case 'telemetry':
           if (ev.event) {
             const te = ev.event as TelemetryEvent
@@ -522,6 +628,18 @@ class StudioClient {
     return () => this.previewListeners.delete(l)
   }
 
+  /**
+   * Fires when a previewed file changes on disk.
+   *
+   * A dev server reloads itself; a static page cannot, so this is what stops a
+   * preview freezing on the agent's first draft. Carries the url so a window
+   * only reloads for its own file.
+   */
+  onPreviewChanged(l: PreviewChangedListener): () => void {
+    this.previewChangedListeners.add(l)
+    return () => this.previewChangedListeners.delete(l)
+  }
+
   /** Forget a node's remembered preview, so closing the window makes it stay closed. */
   forgetPreview(nodeId: string): void {
     this.lastPreviews.delete(nodeId)
@@ -576,6 +694,66 @@ class StudioClient {
     }
   }
 
+  // ── Agent task records ────────────────────────────────────────────────────
+
+  /**
+   * Search and filter task records.
+   *
+   * One call for both, and an empty query is the unfiltered list — which is also
+   * exactly what Reset sends, so there is no second path that could disagree
+   * with the thing it resets.
+   */
+  async records(query: RecordQuery = {}): Promise<{
+    hits: RecordHit[]
+    total: number
+    options: FilterOptions
+  }> {
+    const res = (await window.electron.ipcRenderer.invoke('studio-records', query)) as {
+      hits?: RecordHit[]
+      total?: number
+      options?: FilterOptions
+    }
+    return {
+      hits: res?.hits ?? [],
+      total: res?.total ?? 0,
+      options: res?.options ?? { sections: [], statuses: [], owners: [] }
+    }
+  }
+
+  /** Tick a checklist item, or save the reviewer's notes. */
+  async updateRecord(patch: {
+    id: string
+    itemId?: string
+    item?: Partial<ChecklistItem>
+    notes?: string
+  }): Promise<TaskRecord | null> {
+    const res = (await window.electron.ipcRenderer.invoke('studio-record-update', patch)) as {
+      record?: TaskRecord
+    }
+    return res?.record ?? null
+  }
+
+  /** Build the review packet and save it. Returns the path, or null if cancelled. */
+  async exportRecord(id: string, format: 'md' | 'json' = 'md'): Promise<string | null> {
+    const res = (await window.electron.ipcRenderer.invoke('studio-record-export', {
+      id,
+      format
+    })) as { ok?: boolean; path?: string }
+    return res?.ok ? (res.path ?? null) : null
+  }
+
+  /** Put the demonstration records back, or take them away. */
+  async seedRecords(remove = false): Promise<void> {
+    await window.electron.ipcRenderer.invoke('studio-records-seed', { remove })
+  }
+
+  async deleteRecord(id: string): Promise<boolean> {
+    const res = (await window.electron.ipcRenderer.invoke('studio-record-delete', { id })) as {
+      ok?: boolean
+    }
+    return Boolean(res?.ok)
+  }
+
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
   /**
@@ -589,6 +767,8 @@ class StudioClient {
     plan?: MissionPlan
     edges?: MissionEdge[]
     skipped?: string[]
+    /** The derived source checklist, so it can be filled in before Run. */
+    checklist?: ChecklistItem[]
     error?: string
   }> {
     return (await window.electron.ipcRenderer.invoke('studio-mission-plan', {
@@ -599,6 +779,7 @@ class StudioClient {
       plan?: MissionPlan
       edges?: MissionEdge[]
       skipped?: string[]
+      checklist?: ChecklistItem[]
       error?: string
     }
   }
@@ -611,11 +792,14 @@ class StudioClient {
    */
   async startMission(
     plan: MissionPlan,
-    bindings: { ref: string; nodeId: string }[]
+    bindings: { ref: string; nodeId: string }[],
+    /** The checklist as the user left it. Written into the task record. */
+    checklist: ChecklistItem[] = []
   ): Promise<{ ok: boolean; mission?: MissionState; error?: string }> {
     return (await window.electron.ipcRenderer.invoke('studio-mission-start', {
       plan,
-      bindings
+      bindings,
+      checklist
     })) as { ok: boolean; mission?: MissionState; error?: string }
   }
 
@@ -752,11 +936,6 @@ class StudioClient {
     })) as { ok: boolean; error?: string }
   }
 
-  /** Stop every routing chain — used when the canvas unmounts. */
-  cancelRouting(): void {
-    void window.electron.ipcRenderer.invoke('studio-cancel-routing')
-  }
-
   // ── Dock ──────────────────────────────────────────────────────────────────
 
   async getDock(): Promise<DockState> {
@@ -860,6 +1039,8 @@ interface StudioEventPayload {
   url?: string
   /** `preview-detected`: the port, for the window's subtitle. */
   port?: number
+  /** `preview-detected`: a running server, or a static file an agent wrote. */
+  kind?: 'server' | 'file'
 }
 
 export const studio = new StudioClient()

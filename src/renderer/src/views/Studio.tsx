@@ -414,9 +414,10 @@ function StudioCanvas({
     (
       id: string,
       url: string,
-      over: { sourceNodeId?: string; sourceTitle?: string }
+      over: { sourceNodeId?: string; sourceTitle?: string; kind?: 'server' | 'file' }
     ): PreviewNodeData => ({
       url,
+      kind: over.kind ?? 'server',
       sourceTitle: over.sourceTitle,
       sourceNodeId: over.sourceNodeId,
       onClose: () => {
@@ -472,14 +473,29 @@ function StudioCanvas({
 
       // Match on the relationship, not the id, so a window restored from an
       // older save is adopted rather than duplicated alongside a new one.
-      const existing = current.find((n) => isPreview(n) && n.data.sourceNodeId === ev.nodeId)
+      // Filtered before finding so the result is narrowed to a preview node —
+      // `find` with a guard inside the predicate does not narrow its return.
+      const existing = current.filter(isPreview).find((n) => n.data.sourceNodeId === ev.nodeId)
       /** Derived from the agent, which is what keeps it one-per-agent. */
       const id = existing?.id ?? `pv_${ev.nodeId}`
 
       if (existing) {
+        /**
+         * A live server outranks a static file.
+         *
+         * An agent that starts a dev server and then edits a template fires a
+         * file detection straight after the server one. Letting that through
+         * would swap a working preview for a `file://` view of a half-written
+         * template — the page would look broken while the real one was running
+         * a few pixels away.
+         */
+        if (ev.kind === 'file' && existing.data.kind === 'server') return
+
         setNodes((ns) =>
           ns.map((n) =>
-            n.id === id && isPreview(n) ? { ...n, data: { ...n.data, url: ev.url } } : n
+            n.id === id && isPreview(n)
+              ? { ...n, data: { ...n.data, url: ev.url, kind: ev.kind } }
+              : n
           )
         )
       } else {
@@ -489,7 +505,11 @@ function StudioCanvas({
           id,
           type: 'preview',
           position: { x: source.position.x + sourceW + PREVIEW_GAP, y: source.position.y },
-          data: makePreviewData(id, ev.url, { sourceNodeId: ev.nodeId, sourceTitle: title }),
+          data: makePreviewData(id, ev.url, {
+            sourceNodeId: ev.nodeId,
+            sourceTitle: title,
+            kind: ev.kind
+          }),
           style: { width: PREVIEW_W, height: PREVIEW_H },
           dragHandle: '.studio-drag'
         }
@@ -601,7 +621,10 @@ function StudioCanvas({
                 position: { x: n.x, y: n.y },
                 data: makePreviewData(n.id, n.previewUrl as string, {
                   sourceNodeId: n.sourceNodeId,
-                  sourceTitle
+                  sourceTitle,
+                  // A saved file:// URL comes back as a file; anything else was
+                  // a server when it was written.
+                  kind: n.previewUrl?.startsWith('file:') ? 'file' : 'server'
                 }),
                 style: { width: n.width || PREVIEW_W, height: n.height || PREVIEW_H },
                 dragHandle: '.studio-drag'
@@ -1499,6 +1522,7 @@ function StudioCanvas({
 
           {/* The way in to a whole crew: one request, several agents, tracked. */}
           <button
+            data-tour="studio.dashboard"
             onClick={() => setDashboardOpen((v) => !v)}
             title="Dashboard — describe a job and Brutus assembles the crew"
             className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[10px] font-semibold transition-colors ${
@@ -1514,6 +1538,7 @@ function StudioCanvas({
           <span className="h-4 w-px bg-white/10" />
 
           <button
+            data-tour="studio.autoroute"
             onClick={() => setAutoRoute((v) => !v)}
             title="Whether finished work flows along the strings automatically"
             className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[10px] font-semibold transition-colors ${
@@ -1528,7 +1553,10 @@ function StudioCanvas({
 
           <span className="h-4 w-px bg-white/10" />
 
-          <span className="px-2 text-[10px] font-mono tabular-nums text-zinc-400">
+          <span
+            data-tour="studio.count"
+            className="px-2 text-[10px] font-mono tabular-nums text-zinc-400"
+          >
             {agentCount} {agentCount === 1 ? 'agent' : 'agents'}
             {runningCount > 0 && (
               <span className="text-emerald-400/90"> · {runningCount} running</span>
@@ -1557,6 +1585,7 @@ function StudioCanvas({
           {/* How much Brutus decides on its own. Cycles guarded → strict →
             autonomous; the catastrophic list is blocked in all three. */}
           <button
+            data-tour="studio.autonomy"
             onClick={() => {
               const next: Autonomy =
                 autonomy === 'guarded' ? 'strict' : autonomy === 'strict' ? 'autonomous' : 'guarded'
@@ -1733,6 +1762,7 @@ function StudioCanvas({
               <RiAddLine size={16} />
             </button>
             <input
+              data-tour="studio.command"
               value={command}
               onChange={(e) => setCommand(e.target.value)}
               onKeyDown={(e) => {
@@ -1773,6 +1803,7 @@ function StudioCanvas({
         {/* ── Bottom-right cluster ── */}
         <div className="absolute bottom-6 right-4 z-20 flex items-center gap-1.5">
           <button
+            data-tour="studio.activity"
             onClick={() => setActivityOpen((v) => !v)}
             title="Activity — what Studio is doing"
             className={`cursor-pointer rounded-lg border p-1.5 backdrop-blur-xl transition-colors ${

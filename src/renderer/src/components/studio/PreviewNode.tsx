@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { Handle, NodeResizer, Position, type NodeProps } from 'reactflow'
 import { motion, useReducedMotion } from 'framer-motion'
+import { studio } from '@renderer/services/studio-client'
 import {
   RiExternalLinkLine,
   RiGlobalLine,
@@ -31,7 +32,15 @@ import {
 
 export interface PreviewNodeData {
   url: string
-  /** The agent that started this server, for the header. */
+  /**
+   * A running dev server, or a static page an agent wrote.
+   *
+   * Shown in the header, because the two behave differently and the difference
+   * matters: a server reloads itself when the agent edits, a file does not, and
+   * "why is my change not showing?" has a different answer for each.
+   */
+  kind?: 'server' | 'file'
+  /** The agent that produced it, for the header. */
   sourceTitle?: string
   /**
    * The agent node this preview belongs to.
@@ -61,6 +70,8 @@ function PreviewNode({ data, selected }: NodeProps<PreviewNodeData>): ReactEleme
   const [viewport, setViewport] = useState<(typeof VIEWPORTS)[number]['id']>('fill')
   /** Bumped to force the iframe to remount, which is the only reliable reload. */
   const [nonce, setNonce] = useState(0)
+  /** Set when main reported a change, cleared once the flash has been seen. */
+  const [autoReloaded, setAutoReloaded] = useState(false)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const reduceMotion = useReducedMotion()
 
@@ -122,6 +133,24 @@ function PreviewNode({ data, selected }: NodeProps<PreviewNodeData>): ReactEleme
     setNonce((n) => n + 1)
   }, [])
 
+  /**
+   * Follow the file as the agent rewrites it.
+   *
+   * A dev server reloads itself; a static page cannot, so without this the
+   * window froze on whatever the agent wrote first — and the second pass, which
+   * is usually the good one, was invisible until you clicked reload. Main
+   * watches the file and says when it changed; the url check means a canvas with
+   * several previews only reloads the one that actually moved.
+   */
+  useEffect(() => {
+    return studio.onPreviewChanged((changed) => {
+      if (changed !== url) return
+      setAutoReloaded(true)
+      attemptRef.current = 0
+      setNonce((n) => n + 1)
+    })
+  }, [url])
+
   const go = useCallback(() => {
     const next = draft.trim()
     if (!next) return
@@ -181,6 +210,31 @@ function PreviewNode({ data, selected }: NodeProps<PreviewNodeData>): ReactEleme
 
           <RiGlobalLine size={11} className="ml-1 shrink-0 text-sky-400" />
           <span className="truncate text-[11px] font-semibold text-zinc-100">Preview</span>
+          <span
+            title={
+              data.kind === 'file'
+                ? 'A static file on disk. Brutus watches it and reloads when the agent changes it.'
+                : 'A dev server. It reloads itself as the agent edits.'
+            }
+            className="shrink-0 rounded bg-white/[0.06] px-1.5 py-[1px] font-mono text-[9px] text-zinc-400"
+          >
+            {data.kind === 'file' ? 'file' : 'live'}
+          </span>
+
+          {/* An auto-reload that happened silently reads as a glitch. Saying so
+              for a moment is the difference between "it updated" and "why did
+              it flicker". */}
+          {autoReloaded && (
+            <motion.span
+              key={nonce}
+              initial={reduceMotion ? false : { opacity: 0, y: -3 }}
+              animate={{ opacity: 1, y: 0 }}
+              onAnimationComplete={() => window.setTimeout(() => setAutoReloaded(false), 1400)}
+              className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-[1px] text-[9px] font-semibold text-emerald-400"
+            >
+              updated
+            </motion.span>
+          )}
           {data.sourceTitle && (
             <span className="truncate text-[10px] text-zinc-600">from {data.sourceTitle}</span>
           )}
@@ -244,9 +298,15 @@ function PreviewNode({ data, selected }: NodeProps<PreviewNodeData>): ReactEleme
               {failed ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 bg-canvas px-6 text-center">
                   <RiGlobalLine size={20} className="text-zinc-700" />
-                  <p className="text-[11px] text-zinc-400">Nothing is answering on {url}</p>
+                  <p className="break-all text-[11px] text-zinc-400">
+                    {data.kind === 'file'
+                      ? 'Could not open that file'
+                      : `Nothing is answering on ${url}`}
+                  </p>
                   <p className="text-[10px] leading-relaxed text-zinc-600">
-                    The server may still be starting, or it stopped. Reload once it is up.
+                    {data.kind === 'file'
+                      ? 'The agent may still be writing it, or it was moved.'
+                      : 'The server may still be starting, or it stopped. Reload once it is up.'}
                   </p>
                   <button
                     onClick={reload}

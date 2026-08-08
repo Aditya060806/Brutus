@@ -27,6 +27,7 @@
 import { IpcMain, BrowserWindow, app, dialog } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import { pathToFileURL } from 'url'
 import { spawn } from 'child_process'
 import { PtyManager, defaultShell, ptyAvailable } from './pty-manager'
 import {
@@ -67,7 +68,7 @@ import { startPolicyServer, type PolicyServerHandle } from './policy-server'
 import { installClaudeHook, uninstallClaudeHook } from './hook-install'
 import { PromptWatcher } from './prompt-watch'
 import { StudioRouter, reframeWithModel, type CompletionLike, type RouterGraph } from './router'
-import { DevServerWatcher } from './dev-server'
+import { DevServerWatcher, PageWatcher, isPreviewableFile, isWriteTool } from './dev-server'
 import { ProjectJournal, filesFromToolInput, resolveProjectRoot } from './project'
 import { COMMAND_SYSTEM, commandPrompt, validateMutations } from './command'
 import {
@@ -79,6 +80,26 @@ import {
   validateMission,
   type MissionPlan
 } from './mission'
+import {
+  allRecords,
+  configureRecords,
+  deleteRecord,
+  deriveChecklist,
+  filterOptions,
+  getRecord,
+  patchRecord,
+  reconcileRunning,
+  searchRecords,
+  sectionsFromMission,
+  setChecklistItem,
+  removeSamples,
+  upsertRecord,
+  type ChecklistItem,
+  type RecordQuery,
+  type TaskRecord
+} from './records'
+import { sampleRecords } from './record-seeds'
+import { buildPacket } from './packet'
 import { Telemetry, parseLegacyLine } from './telemetry'
 import { getSharedModelRouter } from '../orchestrator'
 import type {
@@ -103,6 +124,14 @@ interface RegisterOpts {
  * prompt — the human still decides, just in the terminal instead of on canvas.
  */
 const APPROVAL_TIMEOUT_MS = 25_000
+
+/**
+ * How long after a `PreToolUse` hook to look for the file it named.
+ *
+ * The hook fires before the write, so the file is not there yet. Long enough for
+ * the tool to have finished, short enough that the preview still feels immediate.
+ */
+const WRITE_SETTLE_MS = 600
 
 interface SessionMeta {
   kind: AgentKind
@@ -173,6 +202,63 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
     return null
   }
 
+  /**
+   * Persisted agent task records.
+   *
+   * A mission itself is in-memory and dies with the process; this is what
+   * survives it — the sections each agent produced, the source checklist, and
+   * whatever the human wrote about the run afterwards.
+   */
+  configureRecords(path.join(app.getPath('userData'), 'brutus_studio', 'records'))
+
+  /**
+   * Keep a record in step with its live mission.
+   *
+   * Debounced: a busy crew produces a transition every few hundred milliseconds
+   * and each one would otherwise be a synchronous disk write. 300ms coalesces a
+   * burst into one, and the timer is unref'd so a pending write cannot hold the
+   * process open at quit.
+   */
+  const recordWrites = new Map<string, { timer: NodeJS.Timeout; write: () => void }>()
+
+  const syncRecord = (recordId: string, tracker: MissionTracker): void => {
+    clearTimeout(recordWrites.get(recordId)?.timer)
+
+    const write = (): void => {
+      recordWrites.delete(recordId)
+      const snapshot = tracker.snapshot()
+      patchRecord(recordId, {
+        status: snapshot.status,
+        sections: sectionsFromMission(snapshot),
+        finishedAt: snapshot.finishedAt
+      })
+    }
+
+    const timer = setTimeout(write, 300)
+    timer.unref?.()
+    recordWrites.set(recordId, { timer, write })
+  }
+
+  /**
+   * Write out anything the debounce is still holding.
+   *
+   * The 300ms window is the whole point of the debounce, and it is also exactly
+   * long enough to lose the last transition of a run if the app closes right
+   * after a crew finishes — which is when people close it. Flushed on quit so
+   * the final state is the one that gets recorded.
+   */
+  const flushRecordWrites = (): void => {
+    for (const { timer, write } of Array.from(recordWrites.values())) {
+      clearTimeout(timer)
+      try {
+        write()
+      } catch (err) {
+        console.error('[records] flush failed:', err)
+      }
+    }
+    recordWrites.clear()
+  }
+
   const emit = (event: StudioEvent): void => {
     const win = getWindow()
     if (win && !win.isDestroyed()) win.webContents.send('studio-event', event)
@@ -198,6 +284,38 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
   // Stream structured events to the renderer for the Activity panel.
   telemetry.onEvent((event) => emit({ type: 'telemetry', event }))
 
+  /**
+   * Seed the demonstration records, once, into a completely empty store.
+   *
+   * Every part of the review surface is invisible with no records in it, so a
+   * first-time user cannot tell a working feature from a new one. The guard is
+   * strict — `length === 0`, not "no samples" — so this can never appear
+   * alongside real runs, and each seeded record is flagged and removable.
+   */
+  /**
+   * Settle anything a previous run left mid-flight.
+   *
+   * Missions are in-memory, so a record still marked `running` is describing a
+   * crew that died with the last process. Left alone it claims to be in progress
+   * forever — showing up under "running" filters and exporting a packet that
+   * says the work is ongoing when it stopped days ago.
+   */
+  try {
+    const settled = reconcileRunning()
+    if (settled) log(`[records] settled ${settled} record(s) left running by a previous session`)
+  } catch (err) {
+    console.error('[records] could not reconcile stale records:', err)
+  }
+
+  try {
+    if (allRecords().length === 0) {
+      for (const sample of sampleRecords()) upsertRecord(sample)
+      log('[records] seeded 3 sample task records into an empty store')
+    }
+  } catch (err) {
+    console.error('[records] could not seed samples:', err)
+  }
+
   // ── The router: canvas strings as real data flow ──────────────────────────
 
   /**
@@ -213,7 +331,7 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
   const nodeTitles = new Map<string, string>()
 
   const router = new StudioRouter({
-    deliver: (sessionId, text) => manager.enqueue(sessionId, text),
+    deliver: (sessionId, text) => manager.submit(sessionId, text),
     emit,
     log,
     reframe: async (input) => {
@@ -300,6 +418,52 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
     if (meta?.projectRoot) {
       const files = filesFromToolInput(req.toolName, req.toolInput, meta.projectRoot)
       if (files.length) journal.noteFiles(req.sessionId, files)
+
+      /**
+       * The other half of "show me what was built".
+       *
+       * A dev server announces itself and `DevServerWatcher` catches it. A single
+       * static page announces nothing — an agent asked for one `index.html`
+       * writes the file and stops — so there is no URL to scrape and the canvas
+       * would stay empty for exactly the smallest, most common job.
+       *
+       * These paths are already harvested to judge the tool call, and
+       * `filesFromToolInput` discards anything outside the project root, so this
+       * costs one regex and can only ever name a file inside the user's own
+       * repository. Reads are ignored: an agent opens many HTML files while
+       * working, and only a write means "this is the thing I made".
+       */
+      if (isWriteTool(req.toolName)) {
+        const page = files.find(isPreviewableFile)
+        if (page) {
+          const abs = path.join(meta.projectRoot, page)
+          /**
+           * Checked on a delay, not now.
+           *
+           * `PreToolUse` runs BEFORE the tool does, so at this instant the file
+           * the hook is telling us about does not exist. Announcing it here
+           * pointed the frame at nothing, and the preview window spent its three
+           * retries failing before settling on "nothing is answering" — for a
+           * file that had by then been written perfectly well.
+           *
+           * The timer is unref'd so a pending check can never hold the process
+           * open at quit, and `markSeen` is shared with the stream detector so
+           * whichever notices first wins and the other stays quiet.
+           */
+          const timer = setTimeout(() => {
+            let onDisk = false
+            try {
+              onDisk = fs.statSync(abs).isFile()
+            } catch {
+              onDisk = false
+            }
+            if (!onDisk) return
+            if (!pages.markSeen(req.sessionId, abs)) return
+            announcePage(req.sessionId, abs)
+          }, WRITE_SETTLE_MS)
+          timer.unref?.()
+        }
+      }
     }
 
     if (verdict.decision !== 'ask') {
@@ -439,16 +603,156 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
    */
   const devServers = new DevServerWatcher()
 
-  // Every chunk feeds three tracks: the prompt watcher (permissions + idle), the
-  // router (turn transcript + structured events), and dev-server detection.
+  /**
+   * Static pages an agent wrote, spotted in its own output.
+   *
+   * ── WHY THE POLICY HOOK WAS NOT ENOUGH ─────────────────────────────────────
+   * The hook path below `resolvePolicy` is precise, and it only ever fires for
+   * Claude Code — `supportsHook` is false for Codex, Gemini and the shell node,
+   * because `PreToolUse` is a Claude Code feature. A crew where Codex writes the
+   * page, or where the hook failed to install, opened no preview at all. That is
+   * the smallest and most common job this feature exists for: "make me an HTML
+   * page" produces one file, starts no server, and announced nothing.
+   *
+   * Reading the stream covers every agent. It is less precise, so the existence
+   * check is what keeps it honest — a path that is not on disk is not a page.
+   */
+  const pages = new PageWatcher((abs) => {
+    try {
+      return fs.statSync(abs).isFile()
+    } catch {
+      return false
+    }
+  })
+
+  /**
+   * Files a preview window is currently showing, watched for changes.
+   *
+   * A dev server reloads itself when the agent edits; a static page cannot, so
+   * without this the window shows the agent's first draft forever — and the
+   * agent's second pass, which is usually the good one, is invisible.
+   *
+   * Bounded: a long session that previews many pages must not accumulate
+   * watchers, and each one is a real OS handle.
+   */
+  const pageWatches = new Map<string, { watcher: fs.FSWatcher; timer?: NodeJS.Timeout }>()
+  const MAX_PAGE_WATCHES = 12
+  /** Editors and agents write a file in several bursts; coalesce them. */
+  const PAGE_CHANGE_DEBOUNCE_MS = 250
+
+  const watchPage = (absPath: string): void => {
+    if (pageWatches.has(absPath)) return
+
+    if (pageWatches.size >= MAX_PAGE_WATCHES) {
+      const [oldest] = pageWatches.keys()
+      const entry = pageWatches.get(oldest)
+      if (entry) {
+        clearTimeout(entry.timer)
+        entry.watcher.close()
+      }
+      pageWatches.delete(oldest)
+    }
+
+    try {
+      const watcher = fs.watch(absPath, { persistent: false }, () => {
+        const entry = pageWatches.get(absPath)
+        if (!entry) return
+        clearTimeout(entry.timer)
+        // Debounced: one save produces several change events, and reloading an
+        // iframe three times in a row is visible flicker for no gain.
+        entry.timer = setTimeout(() => {
+          emit({ type: 'preview-changed', url: pathToFileURL(absPath).href })
+        }, PAGE_CHANGE_DEBOUNCE_MS)
+        entry.timer.unref?.()
+      })
+      // A watcher that dies — the file was deleted or moved — must not take the
+      // process with it. The window simply stops auto-reloading.
+      watcher.on('error', () => {
+        pageWatches.get(absPath)?.watcher.close()
+        pageWatches.delete(absPath)
+      })
+      pageWatches.set(absPath, { watcher })
+    } catch {
+      /* not watchable; the reload button still works */
+    }
+  }
+
+  const closePageWatches = (): void => {
+    for (const { watcher, timer } of pageWatches.values()) {
+      clearTimeout(timer)
+      try {
+        watcher.close()
+      } catch {
+        /* already gone */
+      }
+    }
+    pageWatches.clear()
+  }
+
+  /** Announce a page, once, whichever half of the detection found it. */
+  const announcePage = (sessionId: string, absPath: string): void => {
+    const nodeId = sessions.get(sessionId)?.nodeId ?? ''
+    log(`[preview] ${nodeTitles.get(nodeId) ?? 'an agent'} wrote ${path.basename(absPath)}`)
+    emit({
+      type: 'preview-detected',
+      sessionId,
+      nodeId,
+      url: pathToFileURL(absPath).href,
+      port: 0,
+      kind: 'file'
+    })
+    // From here on the window follows the file rather than freezing on the
+    // version that happened to exist when it opened.
+    watchPage(absPath)
+  }
+
+  // Every chunk feeds four tracks: the prompt watcher (permissions + idle), the
+  // router (turn transcript + structured events), dev-server detection, and the
+  // static pages an agent says it wrote.
   manager.onData((sessionId, chunk) => {
-    sessions.get(sessionId)?.watcher?.push(chunk)
+    const meta = sessions.get(sessionId)
+    meta?.watcher?.push(chunk)
 
     const hit = devServers.push(sessionId, chunk)
     if (hit) {
-      const nodeId = sessions.get(sessionId)?.nodeId ?? ''
+      const nodeId = meta?.nodeId ?? ''
       log(`[preview] ${nodeTitles.get(nodeId) ?? 'an agent'} started a server on ${hit.url}`)
-      emit({ type: 'preview-detected', sessionId, nodeId, url: hit.url, port: hit.port })
+      emit({
+        type: 'preview-detected',
+        sessionId,
+        nodeId,
+        url: hit.url,
+        port: hit.port,
+        kind: 'server'
+      })
+    }
+
+    /**
+     * A printed path may be relative to where the agent is running, or already
+     * absolute. Resolving against the session's own cwd is what makes
+     * `Write(index.html)` land on the right file when two agents are working in
+     * different folders.
+     *
+     * Anything that resolves OUTSIDE that folder is refused. Terminal output is
+     * untrusted — it contains whatever the agent read, including file names from
+     * other people's documents — and `path.resolve` will happily follow a
+     * `../../..` out of the project and into the rest of the disk. The policy
+     * layer's own harvest already enforces this rule; the stream detector has to
+     * enforce it too, or it becomes the softer way in.
+     */
+    const base = meta?.cwd || meta?.projectRoot || ''
+    if (base) {
+      const contained = (p: string): string => {
+        const abs = path.resolve(base, p)
+        const rel = path.relative(base, abs)
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+          throw new Error('outside the working directory')
+        }
+        return abs
+      }
+      for (const abs of pages.push(sessionId, chunk, contained)) {
+        announcePage(sessionId, abs)
+      }
     }
 
     for (const event of router.observe(sessionId, chunk)) {
@@ -475,6 +779,7 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
     router.unbind(sessionId)
     journal.forgetSession(sessionId)
     devServers.forget(sessionId)
+    pages.forget(sessionId)
 
     /**
      * Settle everything this session still owns.
@@ -548,6 +853,8 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
   app.on('before-quit', () => {
     // Stop routing before tearing down, so nothing tries to deliver into a
     // terminal that is in the middle of being killed.
+    flushRecordWrites()
+    closePageWatches()
     for (const m of missions.values()) m.abort('Brutus is closing.')
     router.cancelAll('cancelled: quitting')
     for (const id of Array.from(sessions.keys())) teardownSession(id)
@@ -892,20 +1199,6 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
    * what is wired to what, so routing can happen entirely in the main process
    * without a round trip per handoff.
    */
-  /**
-   * Stop every routing chain, and the mission driving them.
-   *
-   * NOT called when the canvas unmounts any more. Agents now outlive the
-   * workspace being closed, so a cascade in flight is work the user asked for
-   * and expects to find finished when they come back — cancelling it on the way
-   * out was the old behaviour only because the terminals were about to be
-   * killed. This is now the explicit "stop" the user presses.
-   */
-  ipcMain.handle('studio-cancel-routing', async () => {
-    for (const m of missions.values()) m.abort('Routing was stopped.')
-    return { ok: true, cancelled: router.cancelAll('cancelled by the operator') }
-  })
-
   ipcMain.handle('studio-graph', async (_e, graph: Partial<RouterGraph>) => {
     router.setGraph(graph ?? {})
     /**
@@ -1062,7 +1355,18 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
             plan.steps.map((s) => `${s.title} (${s.agentKind})`).join(', ')
         )
         span.end('ok', { steps: plan.steps.length })
-        return { ok: true, plan, edges: missionEdges(plan), skipped, complexity }
+        /**
+         * The source checklist, derived here rather than asked of the model.
+         *
+         * `estimateComplexity` has already worked out which areas the request
+         * touches; turning each into the input that area needs is a lookup, not
+         * a judgement, so it costs nothing and cannot hallucinate a requirement.
+         * Returned with the plan so the user can see what the task still needs
+         * BEFORE anything runs, which is the whole point of it.
+         */
+        const checklist = deriveChecklist(text, plan.steps)
+
+        return { ok: true, plan, edges: missionEdges(plan), skipped, complexity, checklist }
       } catch (err) {
         span.fail(err)
         return { ok: false, error: String((err as { message?: string })?.message || err) }
@@ -1081,7 +1385,15 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
     'studio-mission-start',
     async (
       _e,
-      { plan, bindings }: { plan?: MissionPlan; bindings?: { ref: string; nodeId: string }[] }
+      {
+        plan,
+        bindings,
+        checklist
+      }: {
+        plan?: MissionPlan
+        bindings?: { ref: string; nodeId: string }[]
+        checklist?: ChecklistItem[]
+      }
     ) => {
       if (!plan?.steps?.length) return { ok: false, error: 'There is no plan to run.' }
 
@@ -1097,15 +1409,69 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
       const previous = missions.get(key)
       if (previous) previous.abort('Replaced by a new mission in this workspace.')
 
+      /**
+       * The record is written before the crew starts.
+       *
+       * So a run that crashes the app on its first step still leaves something
+       * to review — including the checklist the user filled in, which is the
+       * part they did work for.
+       */
+      const record: TaskRecord = {
+        id: plan.id,
+        workspaceId: key,
+        task: plan.task,
+        summary: plan.summary,
+        complexity: plan.complexity,
+        createdAt: Date.now(),
+        status: 'running',
+        checklist: Array.isArray(checklist) ? checklist : deriveChecklist(plan.task, plan.steps),
+        sections: plan.steps.map((step) => ({
+          ref: step.ref,
+          title: step.title,
+          role: step.role,
+          agentKind: step.agentKind,
+          brief: step.brief,
+          status: 'pending' as const
+        })),
+        notes: ''
+      }
+      upsertRecord(record)
+
+      /**
+       * The tracker reaches its own callback, so it cannot close over itself.
+       *
+       * `MissionTracker`'s constructor records `mission.start` and dispatches
+       * its root steps SYNCHRONOUSLY, which means `deps.record` fires before the
+       * constructor returns. A callback closing over `const tracker` therefore
+       * touched the binding while it was still in its temporal dead zone, and
+       * every single mission start died with:
+       *
+       *     ReferenceError: Cannot access 'tracker' before initialization
+       *
+       * A holder assigned immediately afterwards has no dead zone. The
+       * constructor's own first events find it empty and skip the record sync —
+       * which costs nothing, because the record was written moments ago and is
+       * re-synced explicitly below.
+       */
+      const live: { tracker?: MissionTracker } = {}
+
       const tracker = new MissionTracker(plan, Array.isArray(bindings) ? bindings : [], {
         sessionForNode: (nodeId) => router.sessionForNode(nodeId),
-        deliver: (sessionId, text) => manager.enqueue(sessionId, text),
-        record: (level, event, message, fields) =>
+        deliver: (sessionId, text) => manager.submit(sessionId, text),
+        record: (level, event, message, fields) => {
           telemetry.record(level, 'mission', event, message, fields, { traceId: plan.id })
+          // Every transition also updates what will be reviewed later.
+          if (live.tracker) syncRecord(plan.id, live.tracker)
+        }
       })
+      live.tracker = tracker
+      // Catch up on what the constructor already did — it dispatched the root
+      // steps, so they are running, and the record still says pending.
+      syncRecord(plan.id, tracker)
+
       missions.set(key, tracker)
 
-      return { ok: true, mission: tracker.snapshot() }
+      return { ok: true, mission: tracker.snapshot(), recordId: record.id }
     }
   )
 
@@ -1138,6 +1504,134 @@ export default function registerStudio({ ipcMain, getWindow }: RegisterOpts): vo
     router.cancelAll('cancelled: mission stopped')
     return { ok: true, mission: tracker.snapshot() }
   })
+
+  // ── Agent task records: checklist, search, review packet ──────────────────
+
+  /**
+   * Search and filter the records.
+   *
+   * One channel for both, because they are one operation: an empty query is the
+   * unfiltered list, which is also exactly what Reset sends. A second "list all"
+   * path could drift from the filtered one, and then Reset would stop agreeing
+   * with the thing it resets.
+   */
+  ipcMain.handle('studio-records', async (_e, query: RecordQuery = {}) => {
+    const q = query ?? {}
+    const records = allRecords()
+
+    /**
+     * `total` counts what is IN scope, not what exists.
+     *
+     * The panel reads it as "3 of 12" — and 12 meaning "every record on the
+     * machine" while 3 means "in this workspace" is a ratio of two different
+     * things. Counting the same population for both makes the readout true.
+     */
+    const inScope =
+      q.allWorkspaces || !q.workspaceId
+        ? records
+        : records.filter((r) => r.workspaceId === q.workspaceId)
+
+    return {
+      ok: true,
+      hits: searchRecords(records, q),
+      total: inScope.length,
+      options: filterOptions(inScope)
+    }
+  })
+
+  /** Tick a checklist item, or write the reviewer's notes. */
+  ipcMain.handle(
+    'studio-record-update',
+    async (
+      _e,
+      {
+        id,
+        itemId,
+        item,
+        notes
+      }: {
+        id?: string
+        itemId?: string
+        item?: Partial<ChecklistItem>
+        notes?: string
+      }
+    ) => {
+      const recordId = String(id ?? '')
+      if (!recordId) return { ok: false, error: 'Which record?' }
+
+      let updated: TaskRecord | null = null
+      if (itemId) updated = setChecklistItem(recordId, String(itemId), item ?? {})
+      if (typeof notes === 'string') updated = patchRecord(recordId, { notes })
+
+      return updated
+        ? { ok: true, record: updated }
+        : { ok: false, error: 'That record no longer exists.' }
+    }
+  )
+
+  /**
+   * Build the review packet and save it.
+   *
+   * The dialog is the whole authorisation: nothing is written until the user has
+   * chosen a path, and the extension they pick decides which of the two formats
+   * is written.
+   */
+  ipcMain.handle(
+    'studio-record-export',
+    async (_e, { id, format }: { id?: string; format?: 'md' | 'json' }) => {
+      const record = getRecord(String(id ?? ''))
+      if (!record) return { ok: false, error: 'That record no longer exists.' }
+
+      const packet = buildPacket(record)
+      const preferred = format === 'json' ? 'json' : 'md'
+
+      const win = getWindow()
+      const options = {
+        title: 'Save review packet',
+        defaultPath: `${packet.filename}.${preferred}`,
+        filters: [
+          { name: 'Markdown', extensions: ['md'] },
+          { name: 'JSON', extensions: ['json'] }
+        ]
+      }
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
+
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+
+      try {
+        const asJson = result.filePath.toLowerCase().endsWith('.json')
+        fs.writeFileSync(result.filePath, asJson ? packet.json : packet.markdown, 'utf8')
+        log(`[records] exported a review packet to ${path.basename(result.filePath)}`)
+        return { ok: true, path: result.filePath }
+      } catch (err) {
+        return { ok: false, error: String((err as { message?: string })?.message || err) }
+      }
+    }
+  )
+
+  /** Put the demonstration records back, or take them away. */
+  ipcMain.handle('studio-records-seed', async (_e, { remove }: { remove?: boolean } = {}) => {
+    if (remove) {
+      const gone = removeSamples()
+      log(`[records] removed ${gone} sample record(s)`)
+      return { ok: true, removed: gone }
+    }
+    const existing = new Set(allRecords().map((r) => r.id))
+    let added = 0
+    for (const sample of sampleRecords()) {
+      if (existing.has(sample.id)) continue
+      upsertRecord(sample)
+      added++
+    }
+    log(`[records] added ${added} sample record(s)`)
+    return { ok: true, added }
+  })
+
+  ipcMain.handle('studio-record-delete', async (_e, { id }: { id?: string }) => ({
+    ok: deleteRecord(String(id ?? ''))
+  }))
 
   // ── Dock ──────────────────────────────────────────────────────────────────
 

@@ -63,7 +63,10 @@ const bodyOf = (raw) => decode(raw).split('\r\n\r\n').slice(1).join('\r\n\r\n')
 // ═══ 3. Non-ASCII — the ₹ case ════════════════════════════════════════════
 
 {
-  ok('pure ASCII is left readable, not needlessly encoded', encodeHeader('Invoice 4500') === 'Invoice 4500')
+  ok(
+    'pure ASCII is left readable, not needlessly encoded',
+    encodeHeader('Invoice 4500') === 'Invoice 4500'
+  )
   ok('empty stays empty', encodeHeader('') === '')
 
   const encoded = encodeHeader('Invoice ₹45,000')

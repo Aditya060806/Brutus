@@ -3,6 +3,7 @@ import MiniOverlay from './components/MiniOverlay'
 import { brutusService } from './services/Brutus-voice-ai'
 import { getScreenSourceId } from './hooks/CaptureDesktop'
 import Brutus from './UI/Brutus'
+import { TutorialProvider } from './tutorial/TutorialProvider'
 import TerminalOverlay from './components/TerminalOverlay'
 import LeafletMapWidget from './Widgets/MapView'
 import ImageWidget from './Widgets/ImageWidget'
@@ -265,6 +266,7 @@ const IndexRoot = () => {
   }
 
   return (
+    <TutorialProvider>
     <div className="flex flex-col h-screen w-screen bg-black overflow-hidden relative border border-red-500/20 rounded-xl">
       <TitleBar />
       <div className="flex-1 relative">
@@ -340,6 +342,7 @@ const IndexRoot = () => {
       <DeckStudioWidget />
       <KnowledgeGraphWidget />
     </div>
+    </TutorialProvider>
   )
 }
 

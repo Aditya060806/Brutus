@@ -86,6 +86,51 @@ mgr.enqueue(info.id, 'echo IMMEDIATE_OK\r')
 await sleep(1400)
 ok('enqueue writes immediately when idle', mgr.scrollbackOf(info.id).includes('IMMEDIATE_OK'))
 
+// ── submit: the prompt and the Enter are two separate keystrokes ─────────────
+/**
+ * The bug this pins, and it is the whole reason `submit` exists.
+ *
+ * Brutus used to deliver a prompt as one write of `text\r`. Claude Code and
+ * Codex are Ink applications, and Ink hands its input handler everything that
+ * arrived in ONE read of the pty as a single keypress event — so the trailing
+ * carriage return was appended to the input box as text rather than read as
+ * Enter. The prompt sat there, fully typed, waiting for a human to press return.
+ *
+ * A real shell cannot tell the difference, so what is asserted here is the
+ * mechanism: `submit` must send the text first and the `\r` in a later, separate
+ * write, and the command must still actually run.
+ */
+{
+  const writes = []
+  const realWrite = mgr.write.bind(mgr)
+  mgr.write = (id, data) => {
+    writes.push(data)
+    return realWrite(id, data)
+  }
+
+  mgr.submit(info.id, 'echo SUBMIT_OK')
+  // Immediately after the call the text is out but the Enter is not.
+  ok('submit types the prompt first', writes.length === 1 && writes[0] === 'echo SUBMIT_OK')
+  ok('and the prompt carries no Enter of its own', !writes[0].includes('\r'))
+
+  await sleep(1600)
+  ok('the Enter follows as its own write', writes.length === 2 && writes[1] === '\r')
+  ok('and the command actually ran', mgr.scrollbackOf(info.id).includes('SUBMIT_OK'))
+
+  // Busy sessions queue, and drain the same two-step way.
+  mgr.setStatus(info.id, 'busy')
+  writes.length = 0
+  mgr.submit(info.id, 'echo SUBMIT_QUEUED')
+  ok('submit does not type into a busy agent', writes.length === 0)
+
+  mgr.setStatus(info.id, 'idle')
+  await sleep(1800)
+  ok('a queued prompt still arrives in two writes', writes.length === 2 && writes[1] === '\r')
+  ok('and it runs too', mgr.scrollbackOf(info.id).includes('SUBMIT_QUEUED'))
+
+  mgr.write = realWrite
+}
+
 // ── status events ────────────────────────────────────────────────────────────
 const statusEvents = events.filter((e) => e.type === 'status').map((e) => e.status)
 ok('emits status transitions', statusEvents.includes('busy') && statusEvents.includes('idle'))

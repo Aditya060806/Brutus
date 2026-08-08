@@ -77,7 +77,10 @@ const fakeIpc = () => {
     [...ipc.handlers.keys()].every((c) => EXPECTED.includes(c)),
     [...ipc.handlers.keys()].filter((c) => !EXPECTED.includes(c)).join(', ')
   )
-  ok('every handler is callable', [...ipc.handlers.values()].every((h) => typeof h === 'function'))
+  ok(
+    'every handler is callable',
+    [...ipc.handlers.values()].every((h) => typeof h === 'function')
+  )
 }
 
 // ═══ 2. Registration happens before anything that can fail ════════════════
@@ -136,7 +139,10 @@ const fakeIpc = () => {
     console.error = realError
   }
 
-  ok('all channels survive a failed start-up', EXPECTED.every((c) => ipc.handlers.has(c)))
+  ok(
+    'all channels survive a failed start-up',
+    EXPECTED.every((c) => ipc.handlers.has(c))
+  )
   ok(
     'the failure is written to the log',
     logged.some((line) => line.includes('[desk]')),

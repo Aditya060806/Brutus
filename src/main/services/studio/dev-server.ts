@@ -70,6 +70,39 @@ export interface DevServerHit {
 }
 
 /**
+ * Files worth opening a window on.
+ *
+ * HTML only. A preview frame renders a page; pointing it at a `.ts` or a `.json`
+ * shows the browser's idea of plain text, which is worse than showing nothing
+ * because it looks like the feature is broken.
+ */
+const PREVIEWABLE_FILE = /\.html?$/i
+
+/**
+ * Is this a file the canvas can show as a page?
+ *
+ * Used for the other half of "show me what was built": an agent asked for one
+ * static page starts no server at all, so there is no URL to catch. The policy
+ * layer already sees every file an agent writes, and that is what feeds this.
+ */
+export function isPreviewableFile(relPath: string): boolean {
+  return PREVIEWABLE_FILE.test(String(relPath ?? '').trim())
+}
+
+/**
+ * Tool calls that CREATE or CHANGE a file, as opposed to reading one.
+ *
+ * The distinction matters: an agent reads a dozen HTML files while working out
+ * what to do, and opening a window on each would bury the canvas. Only a write
+ * means "this is the thing I made".
+ */
+const WRITE_TOOLS = /^(write|edit|multiedit|create|notebookedit|str_replace|apply_patch)/i
+
+export function isWriteTool(toolName: string): boolean {
+  return WRITE_TOOLS.test(String(toolName ?? '').trim())
+}
+
+/**
  * Find the last dev-server URL in a piece of terminal output.
  *
  * The *last* one, because a framework that prints both a Local and a Network
@@ -96,6 +129,145 @@ export function detectDevServerUrl(raw: string): DevServerHit | null {
   }
 
   return found
+}
+
+// ─── Static pages an agent wrote ────────────────────────────────────────────
+
+/**
+ * Words that mean the agent CHANGED the file rather than looked at it.
+ *
+ * Required on the same line as the path. An agent reads a dozen HTML files
+ * working out what to do, and opening a window on each would bury the canvas —
+ * so a bare path is not enough, something has to say it was written.
+ *
+ * The vocabulary covers what the three CLIs actually print: Claude Code renders
+ * `● Write(index.html)` and `● Update(index.html)`, Codex says `applied patch to`,
+ * Gemini says `WriteFile` / `Wrote`.
+ */
+const WROTE_CONTEXT =
+  /\b(wrote|written|writing|write|writefile|created?|creating|saved?|saving|updated?|update|generated?|applied|patch|new file|modified)\b/i
+
+/**
+ * Path-shaped tokens ending in .html or .htm.
+ *
+ * Both separators, optional drive letter, and a stop at the characters a TUI
+ * uses to wrap a path — quotes, brackets, parentheses. Claude Code prints
+ * `Write(index.html)`, so the closing paren must not become part of the name.
+ */
+const PAGE_PATH_RE = /(?:[A-Za-z]:)?[^\s"'`<>()[\],;:]*\.html?\b/gi
+
+/**
+ * Pull the pages an agent just wrote out of its terminal output.
+ *
+ * ── WHY THIS EXISTS ALONGSIDE THE POLICY HOOK ──────────────────────────────
+ * The policy layer already sees every tool call and knows exactly which file is
+ * being written — it is the precise source, and it is used first. But it only
+ * exists for Claude Code, because `PreToolUse` is a Claude Code feature:
+ * `supportsHook` is false for Codex, Gemini and the shell node. A crew where
+ * Codex builds the page and Gemini checks it would never open a preview at all.
+ *
+ * It also fires BEFORE the tool runs, so the file named by the hook does not
+ * exist yet at the moment the hook reports it.
+ *
+ * Reading the stream is less precise and covers everything: every CLI prints
+ * what it wrote, after writing it. The existence check in `PageWatcher` is what
+ * makes the imprecision safe.
+ */
+export function detectWrittenPages(raw: string): string[] {
+  const text = stripAnsi(String(raw ?? ''))
+  const found: string[] = []
+
+  for (const line of text.split(/[\r\n]+/)) {
+    if (!WROTE_CONTEXT.test(line)) continue
+    for (const match of line.matchAll(PAGE_PATH_RE)) {
+      const candidate = match[0].trim()
+      // A bare extension, or a URL fragment that slipped through.
+      if (!candidate || /^\.html?$/i.test(candidate)) continue
+      if (!found.includes(candidate)) found.push(candidate)
+    }
+  }
+
+  return found
+}
+
+/**
+ * Per-session detector for static pages.
+ *
+ * Separate from `DevServerWatcher` because the two answer different questions —
+ * "is something serving?" versus "did something get written?" — and because a
+ * page has to be checked against the disk while a URL does not.
+ *
+ * `exists` is injected so the whole thing is testable without a filesystem, and
+ * so the caller decides how a relative path resolves against a session's cwd.
+ */
+export class PageWatcher {
+  private tails = new Map<string, string>()
+  private seen = new Map<string, Set<string>>()
+
+  constructor(private exists: (absPath: string) => boolean) {}
+
+  /**
+   * Feed a chunk. Returns absolute paths of pages seen for the first time.
+   *
+   * `resolve` turns a printed path — which may be relative, or already absolute
+   * — into the absolute one to check and announce.
+   */
+  push(sessionId: string, chunk: string, resolve: (p: string) => string): string[] {
+    const tail = this.tails.get(sessionId) ?? ''
+    const window = tail + String(chunk ?? '')
+    this.tails.set(sessionId, window.slice(-TAIL_BYTES))
+
+    const candidates = detectWrittenPages(window)
+    if (!candidates.length) return []
+
+    let reported = this.seen.get(sessionId)
+    if (!reported) {
+      reported = new Set()
+      this.seen.set(sessionId, reported)
+    }
+
+    const hits: string[] = []
+    for (const candidate of candidates) {
+      let abs: string
+      try {
+        abs = resolve(candidate)
+      } catch {
+        continue
+      }
+      if (reported.has(abs)) continue
+      /**
+       * The check that makes stream-reading safe.
+       *
+       * Terminal output is untrusted and imprecise: it contains file names from
+       * READMEs, from error messages, from the agent thinking out loud. A path
+       * that is not actually on disk is not a page anyone can preview, so it is
+       * simply dropped — and a name is only ever marked seen once it resolved,
+       * so a file mentioned before it exists is still caught when it appears.
+       */
+      if (!this.exists(abs)) continue
+      reported.add(abs)
+      hits.push(abs)
+    }
+
+    return hits
+  }
+
+  /** Has this session already announced this page? Shared with the hook path. */
+  markSeen(sessionId: string, absPath: string): boolean {
+    let reported = this.seen.get(sessionId)
+    if (!reported) {
+      reported = new Set()
+      this.seen.set(sessionId, reported)
+    }
+    if (reported.has(absPath)) return false
+    reported.add(absPath)
+    return true
+  }
+
+  forget(sessionId: string): void {
+    this.tails.delete(sessionId)
+    this.seen.delete(sessionId)
+  }
 }
 
 /**

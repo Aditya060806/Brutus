@@ -46,7 +46,12 @@ const baseCtx = (over = {}) => ({
     createdAt: NOON,
     kind: 'reply'
   },
-  triage: { category: 'needs-reply', priority: 2, reason: 'Asked a direct question', confidence: 0.95 },
+  triage: {
+    category: 'needs-reply',
+    priority: 2,
+    reason: 'Asked a direct question',
+    confidence: 0.95
+  },
   recentSends: [],
   now: NOON,
   ...over
@@ -58,7 +63,11 @@ const allow = (over) => mayAutoSend(baseCtx(over))
 //
 // Without this, a rail that refuses everything would pass every other test.
 
-ok('a clean, confident reply to a known contact is allowed', allow().ok === true, JSON.stringify(allow()))
+ok(
+  'a clean, confident reply to a known contact is allowed',
+  allow().ok === true,
+  JSON.stringify(allow())
+)
 
 // ═══ 1. Autonomy off refuses EVERYTHING ═══════════════════════════════════
 //
@@ -137,7 +146,10 @@ ok(
 
 {
   const low = allow({ triage: { ...baseCtx().triage, confidence: 0.5 } })
-  ok('below the floor it drafts instead of sending', low.ok === false && low.code === 'low-confidence')
+  ok(
+    'below the floor it drafts instead of sending',
+    low.ok === false && low.code === 'low-confidence'
+  )
   ok('the refusal quotes both numbers', /50%/.test(low.reason) && /75%/.test(low.reason))
 }
 
@@ -205,7 +217,10 @@ ok(
 
 {
   const d = allow({ thread: { ...baseCtx().thread, lastAutoReplyAt: NOON - 3600_000 } })
-  ok('a thread replied to an hour ago is on cooldown', d.ok === false && d.code === 'thread-cooldown')
+  ok(
+    'a thread replied to an hour ago is on cooldown',
+    d.ok === false && d.code === 'thread-cooldown'
+  )
   ok('the refusal says how long ago', /1h ago/.test(d.reason), d.reason)
 }
 
@@ -233,7 +248,8 @@ ok(
 
 ok(
   'sends older than 24h do not count',
-  allow({ recentSends: Array.from({ length: 30 }, (_, i) => NOON - (25 + i) * 3600_000) }).ok === true
+  allow({ recentSends: Array.from({ length: 30 }, (_, i) => NOON - (25 + i) * 3600_000) }).ok ===
+    true
 )
 
 ok(
@@ -303,8 +319,14 @@ ok(
     allow({ triage: { ...baseCtx().triage, category: 'ignore' } }),
     allow({ draft: { ...baseCtx().draft, body: '' } })
   ]
-  ok('every tested path refuses', refusals.every((r) => r.ok === false))
-  ok('every refusal carries a code', refusals.every((r) => typeof r.code === 'string' && r.code))
+  ok(
+    'every tested path refuses',
+    refusals.every((r) => r.ok === false)
+  )
+  ok(
+    'every refusal carries a code',
+    refusals.every((r) => typeof r.code === 'string' && r.code)
+  )
   ok(
     'every refusal carries a human-readable reason',
     refusals.every((r) => typeof r.reason === 'string' && r.reason.length > 20),

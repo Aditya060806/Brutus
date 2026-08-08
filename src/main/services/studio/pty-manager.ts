@@ -62,6 +62,28 @@ export function ptyAvailable(): { ok: boolean; error?: string } {
  * a state to honour. Everything else may move freely between the live states,
  * because a turn can end, an approval can interrupt it, and work can resume.
  */
+/**
+ * One queued write.
+ *
+ * `submit` distinguishes a prompt — which needs an Enter afterwards, sent as its
+ * own keystroke — from a raw sequence that must go through untouched.
+ */
+interface PendingWrite {
+  text: string
+  submit: boolean
+}
+
+/**
+ * Gap between typing a prompt and pressing Enter.
+ *
+ * Long enough that the CLI reads them as two separate input events, short
+ * enough to be invisible. See `submit()` for why one write does not work.
+ */
+const SUBMIT_DELAY_MS = 120
+
+/** Settling time after an agent reports idle, before Brutus types into it. */
+const DRAIN_DELAY_MS = 120
+
 const ALLOWED_TRANSITIONS: Record<SessionStatus, readonly SessionStatus[]> = {
   starting: ['idle', 'busy', 'awaiting-approval', 'exited', 'failed'],
   idle: ['busy', 'awaiting-approval', 'exited', 'failed'],
@@ -87,7 +109,7 @@ interface Session {
   /** Bounded scrollback so replay is possible without unbounded memory. */
   scrollback: string
   /** Writes queued because the agent is mid-turn. */
-  pending: string[]
+  pending: PendingWrite[]
   disposed: boolean
 }
 
@@ -252,10 +274,37 @@ export class PtyManager {
   }
 
   /**
-   * Queue a prompt until the agent is actually free.
+   * Type a prompt, then press Enter — as two separate keystrokes.
+   *
+   * ── WHY NOT ONE WRITE OF `text\r` ─────────────────────────────────────────
+   * That is what this used to do, and it did not submit. Claude Code and Codex
+   * are Ink applications: Ink hands its `useInput` handler whatever arrived in
+   * one read of the pty as a SINGLE event. A write of `"do the thing\r"` is one
+   * read, so the handler sees one keypress whose text happens to end in a
+   * carriage return — and appends the lot to the input box instead of
+   * submitting. The prompt then sits there, typed but never sent, waiting for a
+   * human to press Enter. Which is exactly what it looked like.
+   *
+   * Written separately, the `\r` lands in its own read and therefore its own
+   * input event, which every one of these CLIs reads as the Enter key.
+   */
+  submit(id: string, text: string): void {
+    const s = this.sessions.get(id)
+    if (!s || s.disposed) return
+    if (s.info.status === 'idle') {
+      this.deliver(id, { text, submit: true })
+      return
+    }
+    s.pending.push({ text, submit: true })
+  }
+
+  /**
+   * Queue a raw write until the agent is free.
    *
    * Typing into a CLI that is mid-turn corrupts its input buffer, so Brutus
-   * never does it; the write lands the moment the adapter reports idle.
+   * never does it; the write lands the moment the adapter reports idle. Unlike
+   * `submit`, whatever is passed here is sent verbatim — control characters
+   * included — so it stays available for keystrokes that are not a prompt.
    */
   enqueue(id: string, data: string): void {
     const s = this.sessions.get(id)
@@ -264,7 +313,16 @@ export class PtyManager {
       this.write(id, data)
       return
     }
-    s.pending.push(data)
+    s.pending.push({ text: data, submit: false })
+  }
+
+  /** Send one queued item, pressing Enter afterwards when it is a prompt. */
+  private deliver(id: string, item: PendingWrite): void {
+    if (!this.write(id, item.text)) return
+    if (!item.submit) return
+    // Unref'd: a pending Enter must never hold the process open at quit.
+    const timer = setTimeout(() => this.write(id, '\r'), SUBMIT_DELAY_MS)
+    timer.unref?.()
   }
 
   /**
@@ -303,7 +361,8 @@ export class PtyManager {
     // Drain anything Brutus queued while the agent was busy.
     if (status === 'idle' && s.pending.length) {
       const next = s.pending.shift()!
-      setTimeout(() => this.write(id, next), 120)
+      const timer = setTimeout(() => this.deliver(id, next), DRAIN_DELAY_MS)
+      timer.unref?.()
     }
   }
 

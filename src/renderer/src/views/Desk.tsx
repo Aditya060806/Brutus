@@ -247,7 +247,11 @@ const DeskView = (): React.JSX.Element => {
         {/* ── Status strip ──
             The one place that answers "is this thing on, and when did it last
             do anything?" without needing to open settings. */}
-        <Card tone="surface" className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
+        <Card
+          data-tour="desk.status"
+          tone="surface"
+          className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3"
+        >
           <span className="flex items-center gap-2">
             <span
               className={cn(
@@ -303,7 +307,7 @@ const DeskView = (): React.JSX.Element => {
         )}
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1.5">
+        <div data-tour="desk.tabs" className="flex gap-1.5">
           {(
             [
               ['needs-you', 'Needs you'],

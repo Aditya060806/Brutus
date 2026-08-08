@@ -125,11 +125,16 @@ ok(
     e.keywords.every((word) => searchEntries(word).some((r) => r.id === e.id))
   ),
   SETTINGS_ENTRIES.flatMap((e) =>
-    e.keywords.filter((w) => !searchEntries(w).some((r) => r.id === e.id)).map((w) => `${e.id}:${w}`)
+    e.keywords
+      .filter((w) => !searchEntries(w).some((r) => r.id === e.id))
+      .map((w) => `${e.id}:${w}`)
   ).join(', ')
 )
 
-ok('search is case-insensitive', searchEntries('ACCOUNT').some((r) => r.id === 'account'))
+ok(
+  'search is case-insensitive',
+  searchEntries('ACCOUNT').some((r) => r.id === 'account')
+)
 
 ok('a nonsense query returns nothing', searchEntries('zzzzqqq').length === 0)
 

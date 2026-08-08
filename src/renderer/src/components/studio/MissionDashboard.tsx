@@ -11,7 +11,9 @@ import {
   RiPlayFill,
   RiSendPlane2Fill,
   RiStopCircleLine,
-  RiTimeLine
+  RiTimeLine,
+  RiArchiveLine,
+  RiAddLine
 } from 'react-icons/ri'
 import {
   studio,
@@ -22,6 +24,9 @@ import {
   type StepStatus
 } from '@renderer/services/studio-client'
 import { useDictation } from './use-dictation'
+import SourceChecklist from './SourceChecklist'
+import RecordsPanel from './RecordsPanel'
+import type { ChecklistItem } from '@renderer/services/studio-client'
 
 /**
  * The Dashboard — one request, a crew that runs it.
@@ -93,6 +98,17 @@ export default function MissionDashboard({
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState<MissionState | null>(null)
+  /** Which half of the Dashboard is showing. */
+  const [tab, setTab] = useState<'new' | 'records'>('new')
+  /**
+   * The source checklist for the plan on screen.
+   *
+   * Held here rather than inside `PlanPreview` because it outlives it: the
+   * ticks a user makes before pressing Run are handed to `startMission`, which
+   * writes them into the task record. State inside the preview would be thrown
+   * away at exactly the moment it becomes worth keeping.
+   */
+  const [checklist, setChecklist] = useState<ChecklistItem[]>([])
   const reduceMotion = useReducedMotion()
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -150,6 +166,7 @@ export default function MissionDashboard({
       setPlan(res.plan)
       setEdges(res.edges ?? [])
       setSkipped(res.skipped ?? [])
+      setChecklist(res.checklist ?? [])
     } catch (err) {
       setError(String((err as { message?: string })?.message || err))
     } finally {
@@ -167,7 +184,7 @@ export default function MissionDashboard({
         setError(laid.error ?? 'The crew could not be placed on the canvas.')
         return
       }
-      const res = await studio.startMission(plan, laid.bindings)
+      const res = await studio.startMission(plan, laid.bindings, checklist)
       if (!res.ok || !res.mission) {
         setError(res.error ?? 'The mission could not be started.')
         return
@@ -179,7 +196,7 @@ export default function MissionDashboard({
     } finally {
       setLaunching(false)
     }
-  }, [plan, edges, onRun, launching])
+  }, [plan, edges, onRun, launching, checklist])
 
   const stop = useCallback(async () => {
     const m = await studio.abortMission(workspaceId)
@@ -191,8 +208,17 @@ export default function MissionDashboard({
     setPlan(null)
     setEdges([])
     setSkipped([])
+    setChecklist([])
     setError(null)
     setTask('')
+  }, [])
+
+  const tickItem = useCallback((id: string, done: boolean) => {
+    setChecklist((items) => items.map((i) => (i.id === id ? { ...i, done } : i)))
+  }, [])
+
+  const answerItem = useCallback((id: string, value: string) => {
+    setChecklist((items) => items.map((i) => (i.id === id ? { ...i, value } : i)))
   }, [])
 
   return (
@@ -208,8 +234,41 @@ export default function MissionDashboard({
         <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-200">
           Dashboard
         </span>
-        <span className="text-[11px] text-zinc-600">
-          {live ? 'A crew is on the job' : 'Describe the job — Brutus assembles the crew'}
+        {/* Two halves of one job: starting work, and reviewing what came back.
+            A segmented control rather than a second panel, because the records
+            are about the same thing the New tab produces. */}
+        <div className="flex items-center rounded-lg bg-white/[0.06] p-0.5">
+          {(
+            [
+              // The anchor is spelled out rather than templated: `data-tour` is a
+              // contract the tutorial greps for, and a value assembled at runtime
+              // cannot be found by reading the source — which is exactly what the
+              // anchor test checks, and it caught this.
+              ['new', 'New', RiAddLine, 'dashboard.tab.new'],
+              ['records', 'Records', RiArchiveLine, 'dashboard.tab.records']
+            ] as const
+          ).map(([id, label, Icon, anchor]) => (
+            <button
+              key={id}
+              data-tour={anchor}
+              onClick={() => setTab(id)}
+              aria-pressed={tab === id}
+              className={`flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold transition-colors ${
+                tab === id ? 'bg-white/15 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <Icon size={11} />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <span className="truncate text-[11px] text-zinc-600">
+          {tab === 'records'
+            ? 'Everything the agents have produced'
+            : live
+              ? 'A crew is on the job'
+              : 'Describe the job — Brutus assembles the crew'}
         </span>
         <button
           onClick={onClose}
@@ -221,7 +280,9 @@ export default function MissionDashboard({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {live ? (
+        {tab === 'records' ? (
+          <RecordsPanel workspaceId={workspaceId} />
+        ) : live ? (
           <LiveBoard mission={live} onStop={() => void stop()} onNew={reset} />
         ) : (
           <div className="flex flex-col gap-3 p-4">
@@ -246,6 +307,7 @@ export default function MissionDashboard({
               <div className="mt-1 flex items-center gap-2">
                 {dictation.supported && (
                   <button
+                    data-tour="dashboard.mic"
                     onClick={dictation.toggle}
                     disabled={dictation.transcribing || planning}
                     title={dictation.recording ? 'Stop and transcribe' : 'Speak instead of typing'}
@@ -301,6 +363,9 @@ export default function MissionDashboard({
                 plan={plan}
                 skipped={skipped}
                 launching={launching}
+                checklist={checklist}
+                onTick={tickItem}
+                onAnswer={answerItem}
                 onRun={() => void run()}
                 onDiscard={() => setPlan(null)}
               />
@@ -334,18 +399,49 @@ function PlanPreview({
   plan,
   skipped,
   launching,
+  checklist,
+  onTick,
+  onAnswer,
   onRun,
   onDiscard
 }: {
   plan: MissionPlan
   skipped: string[]
   launching: boolean
+  checklist: ChecklistItem[]
+  onTick: (id: string, done: boolean) => void
+  onAnswer: (id: string, value: string) => void
   onRun: () => void
   onDiscard: () => void
 }): ReactElement {
+  const outstanding = checklist.filter((i) => i.required && !i.done).length
+  const count = plan.steps.length
+
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+    <div
+      data-tour="dashboard.plan"
+      className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3"
+    >
       <p className="text-[12px] font-medium leading-snug text-zinc-200">{plan.summary}</p>
+
+      {/* Why this many agents.
+          The user never asks for a crew size, so the one thing they cannot infer
+          from the list below is why it is this long. Saying it plainly is what
+          stops "it opened five terminals" reading as arbitrary. */}
+      <p className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+        <span
+          className={`rounded px-1.5 py-0.5 font-semibold uppercase tracking-[0.1em] ${
+            plan.complexity === 'complex'
+              ? 'bg-red-500/12 text-red-400'
+              : plan.complexity === 'standard'
+                ? 'bg-amber-400/12 text-amber-400'
+                : 'bg-emerald-500/12 text-emerald-400'
+          }`}
+        >
+          {plan.complexity}
+        </span>
+        judged {plan.complexity} — {count} agent{count === 1 ? '' : 's'} for this one
+      </p>
 
       <div className="flex flex-col gap-1.5">
         {plan.steps.map((s, i) => (
@@ -393,6 +489,12 @@ function PlanPreview({
         </div>
       )}
 
+      {/* ── What this task still needs ──
+          Directly above Run, because that is the moment it matters: once
+          several CLIs are editing files, "you never said which database" is
+          expensive to undo. */}
+      <SourceChecklist items={checklist} onToggle={onTick} onValue={onAnswer} />
+
       <div className="flex items-center gap-2">
         <button
           onClick={onRun}
@@ -415,7 +517,20 @@ function PlanPreview({
         >
           Rewrite
         </button>
-        <span className="ml-auto text-[10px] text-zinc-600">Each agent opens a real terminal</span>
+
+        {/* Warns; never blocks. The checklist is derived from what the request
+            appears to touch, so it is sometimes wrong — and a checklist that can
+            refuse to let you work is one people learn to defeat. */}
+        {outstanding > 0 ? (
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-amber-400/90">
+            <RiAlertLine size={10} />
+            {outstanding} input{outstanding === 1 ? '' : 's'} still missing
+          </span>
+        ) : (
+          <span className="ml-auto text-[10px] text-zinc-600">
+            Each agent opens a real terminal
+          </span>
+        )}
       </div>
     </div>
   )

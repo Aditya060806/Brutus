@@ -53,16 +53,25 @@ import { sanitizeForTerminal } from './router'
  */
 export const MAX_STEPS = 6
 /**
- * Agents every mission gets, however small the request looks.
+ * The default floor: somebody builds, somebody else checks.
  *
- * One agent is not a crew — it is the CLI the user could have opened himself,
- * with extra steps. The floor exists because the whole promise of the Dashboard
- * is that somebody builds and somebody else checks, and a single terminal
- * marking its own homework is the failure mode that makes multi-agent work
- * pointless. The user never asks for a count; this is the guarantee underneath
- * that.
+ * A single terminal marking its own homework is the failure mode that makes
+ * multi-agent work pointless, so almost every request gets a reviewer whether
+ * the planner asked for one or not.
+ *
+ * `TRIVIAL_MIN_STEPS` is the deliberate exception. Spinning up a second real
+ * CLI process — its own model subscription, its own worktree — to review a
+ * single static HTML file costs more than the file did. Which floor applies is
+ * decided by `estimateComplexity`, never by the user, who is not asked for a
+ * count at any point.
  */
 export const MIN_STEPS = 2
+export const TRIVIAL_MIN_STEPS = 1
+
+/** The crew floor a request of this size is held to. */
+export function floorFor(tier: ComplexityTier): number {
+  return tier === 'trivial' ? TRIVIAL_MIN_STEPS : MIN_STEPS
+}
 export const MAX_BRIEF_CHARS = 1500
 export const MAX_TITLE_CHARS = 40
 export const MAX_ROLE_CHARS = 40
@@ -142,7 +151,7 @@ export interface MissionState {
 
 // ─── How big a crew does this deserve? ──────────────────────────────────────
 
-export type ComplexityTier = 'simple' | 'standard' | 'complex'
+export type ComplexityTier = 'trivial' | 'simple' | 'standard' | 'complex'
 
 export interface ComplexityEstimate {
   tier: ComplexityTier
@@ -151,6 +160,15 @@ export interface ComplexityEstimate {
   crew: { min: number; max: number }
   /** What was spotted in the request. Shown to the model so it can disagree. */
   signals: string[]
+  /**
+   * The areas of work the request touches, as names.
+   *
+   * The same detection that feeds `signals`, but structured. `signals` is prose
+   * for the planner to read; this is a list for code to act on — the source
+   * checklist turns each surface into the input that surface needs, and parsing
+   * it back out of an English sentence would be absurd.
+   */
+  surfaces: string[]
 }
 
 /**
@@ -162,7 +180,10 @@ export interface ComplexityEstimate {
  * shorter sentence.
  */
 const SURFACES: [string, RegExp][] = [
-  ['frontend', /\b(ui|front[- ]?end|page|screen|component|css|styl(e|ing)|layout|site|website|portfolio|landing|dashboard)\b/i],
+  [
+    'frontend',
+    /\b(ui|front[- ]?end|page|screen|component|css|styl(e|ing)|layout|site|website|portfolio|landing|dashboard)\b/i
+  ],
   ['backend', /\b(back[- ]?end|api|server|endpoint|route|handler|microservice)\b/i],
   ['database', /\b(database|db|schema|migration|sql|postgres|mongo|prisma|table)\b/i],
   ['auth', /\b(auth|login|signup|sign[- ]?in|oauth|session|jwt|permission|role)\b/i],
@@ -174,10 +195,24 @@ const SURFACES: [string, RegExp][] = [
 ]
 
 /** Verbs that mean "touch a lot of files", not "write one function". */
-const HEAVY = /\b(refactor|rewrite|migrate|re[- ]?architect|redesign|overhaul|integrate|optimi[sz]e|scale|modernis|port\b|convert)\b/i
+const HEAVY =
+  /\b(refactor|rewrite|migrate|re[- ]?architect|redesign|overhaul|integrate|optimi[sz]e|scale|modernis|port\b|convert)\b/i
 
 /** Words that say plainly this is meant to be small. */
-const SMALL = /\b(minimal|simple|small|quick|tiny|basic|just|only|single|one[- ]page|barebones|prototype)\b/i
+const SMALL =
+  /\b(minimal|simple|small|quick|tiny|basic|just|only|single|one[- ]page|barebones|prototype)\b/i
+
+/**
+ * One artefact, no moving parts.
+ *
+ * A single static file, a typo, one README line. Work where a reviewer has
+ * nothing to check that opening the file would not answer faster.
+ */
+const ONE_FILE =
+  /(\b(html file|a file|one file|single file|hello[- ]world|typo|snippet)\b|\bindex\.html\b|\breadme\b|\.(html|css|js|jsx|ts|tsx|md|json|txt|py)\b)/i
+
+/** Verbs that produce one thing rather than a system. */
+const SMALL_VERB = /\b(fix|rename|tweak|adjust|add|write|make|create|update)\b/i
 
 /**
  * Judge how much machinery a request is worth.
@@ -232,15 +267,36 @@ export function estimateComplexity(task: string): ComplexityEstimate {
 
   score = Math.max(0, score)
 
-  const tier: ComplexityTier = score <= 1 ? 'simple' : score <= 3 ? 'standard' : 'complex'
-  const crew =
-    tier === 'simple'
-      ? { min: MIN_STEPS, max: 3 }
-      : tier === 'standard'
-        ? { min: 3, max: 4 }
-        : { min: 4, max: MAX_STEPS }
+  /**
+   * Trivial: one file, one small verb, nothing else going on.
+   *
+   * All three conditions, deliberately. "Write an index.html" qualifies; "write
+   * the index.html, wire it to the API and add tests" does not, because the
+   * extra surfaces already pushed the score up. This is the only tier that may
+   * run a single agent, so it is the one that has to be hardest to trip.
+   */
+  const trivial =
+    score === 0 && ONE_FILE.test(text) && SMALL_VERB.test(text) && surfaces.length <= 1
+  if (trivial) signals.push('one file, nothing else moving')
 
-  return { tier, score, crew, signals }
+  const tier: ComplexityTier = trivial
+    ? 'trivial'
+    : score <= 1
+      ? 'simple'
+      : score <= 3
+        ? 'standard'
+        : 'complex'
+
+  const crew =
+    tier === 'trivial'
+      ? { min: TRIVIAL_MIN_STEPS, max: 2 }
+      : tier === 'simple'
+        ? { min: MIN_STEPS, max: 3 }
+        : tier === 'standard'
+          ? { min: 3, max: 4 }
+          : { min: 4, max: MAX_STEPS }
+
+  return { tier, score, crew, signals, surfaces }
 }
 
 // ─── Planning prompt ────────────────────────────────────────────────────────
@@ -258,9 +314,11 @@ export const MISSION_SYSTEM = [
   '- Use only agentKind values listed as AVAILABLE. Never invent one.',
   '',
   'CREW SIZE — you decide this, the user never states it:',
-  '- NEVER fewer than 2 agents. One agent marking its own work is not a crew.',
   '- The default pairing is ONE claude to build and ONE codex to review it.',
   '  Start there and add only what the work actually needs.',
+  '- A SINGLE agent is allowed ONLY when the COMPLEXITY block below says',
+  '  "trivial" — one static file, a typo, one small edit. Reviewing that with a',
+  '  second CLI costs more than the change did. Everywhere else, two at minimum.',
   '- Size the crew to the COMPLEXITY block below. It gives you a target range;',
   '  stay inside it unless the request plainly contradicts it, and never exceed 6.',
   '- Scale UP by splitting real, separable work — not by duplicating a job:',
@@ -450,19 +508,25 @@ export function validateMission(raw: unknown, opts: ValidateMissionOpts): Missio
   if (!steps.length) return { plan: null, skipped }
 
   /**
-   * Enforce the crew floor.
+   * Enforce the crew floor for this size of request.
    *
-   * The system prompt asks for at least two agents; this is what makes it true.
-   * A model that returns one step — because the request looked trivial, or
-   * because it ignored the instruction — would otherwise produce a "crew" of one
-   * terminal reviewing itself.
+   * The system prompt asks for a builder and a reviewer; this is what makes it
+   * true. A model that returns one step — because it ignored the instruction, or
+   * because everything after the first was dropped as unrunnable — would
+   * otherwise produce a "crew" of one terminal reviewing itself.
    *
-   * Only ever tops up a plan that is BELOW the floor. A model that returned two
+   * The floor is 1 for a trivial request and 2 for everything else, so a single
+   * static HTML file does not conscript a second CLI to admire it.
+   *
+   * Only ever tops up a plan that is BELOW its floor. A model that returned two
    * or more has made a considered choice about who does what, and adding an
    * uninvited agent to that risks two of them editing the same files — the one
    * failure the crew-size rules exist to avoid.
    */
-  while (steps.length < MIN_STEPS) {
+  const complexity = estimateComplexity(opts.task)
+  const floor = floorFor(complexity.tier)
+
+  while (steps.length < floor) {
     const last = steps[steps.length - 1]
     const kind = pickReviewer(opts.availableKinds, last.agentKind)
     if (!kind) break // nothing installed to add; one agent is better than none
@@ -486,7 +550,7 @@ export function validateMission(raw: unknown, opts: ValidateMissionOpts): Missio
       dependsOn: last.ref
     })
     skipped.push(
-      `Only one agent was planned, so a ${kind} step was added to review the work — a crew is never one agent.`
+      `Only one agent was planned for a ${complexity.tier} request, so a ${kind} step was added to review the work.`
     )
   }
 
@@ -497,7 +561,7 @@ export function validateMission(raw: unknown, opts: ValidateMissionOpts): Missio
       task: opts.task,
       summary: str((raw as { summary?: unknown })?.summary, MAX_SUMMARY_CHARS) || opts.task,
       steps,
-      complexity: estimateComplexity(opts.task).tier
+      complexity: complexity.tier
     },
     skipped
   }
@@ -645,8 +709,8 @@ export class MissionTracker {
        *
        * The brief came from a model and is about to become keystrokes in a real
        * pseudo-terminal. Doing it here means the guarantee holds for every path
-       * that reaches a pty, exactly as the router does it — and the `\r` below
-       * is the only control character that ever gets through.
+       * that reaches a pty, exactly as the router does it. `deliver` presses
+       * Enter afterwards as its own keystroke — see `PtyManager.submit`.
        */
       const safe = sanitizeForTerminal(step.brief)
       if (!safe) {
@@ -665,7 +729,7 @@ export class MissionTracker {
       step.status = 'running'
       step.startedAt = this.now()
       this.touch()
-      this.deps.deliver(session, `${safe}\r`)
+      this.deps.deliver(session, safe)
       this.deps.record('info', 'step.dispatch', `${step.title} — ${step.role}`, {
         ref: step.ref,
         agent: step.agentKind,

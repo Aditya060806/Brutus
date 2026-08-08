@@ -131,8 +131,16 @@ async function turn(r, output) {
   // eslint-disable-next-line no-control-regex
   const controls = text.replace(/\r$/, '').match(/[\x00-\x1f\x7f]/g)
   ok('no control character reaches the terminal', controls === null, JSON.stringify(controls))
-  ok('the trailing carriage return is ours and is present', text.endsWith('\r'))
-  ok('exactly one carriage return is sent', (text.match(/\r/g) ?? []).length === 1)
+  /**
+   * The delivered prompt now carries NO carriage return at all.
+   *
+   * `PtyManager.submit` presses Enter afterwards as its own write, because Ink
+   * applications read one pty read as one keypress and were appending a combined
+   * `text\r` to the input box instead of submitting it. For this suite that is
+   * strictly stronger than before: not one control character survives, rather
+   * than exactly one that happened to be ours.
+   */
+  ok('no carriage return is smuggled through at all', !text.includes('\r'))
 }
 
 {
@@ -144,7 +152,7 @@ async function turn(r, output) {
 
   ok('the fallback still delivers', delivered.length === 1)
   const text = delivered[0]?.text ?? ''
-  // eslint-disable-next-line no-control-regex
+
   ok(
     'the fallback output is sanitised too',
     !/[\x00-\x1f\x7f]/.test(text.replace(/\r$/, '')),

@@ -36,6 +36,16 @@ const TARGETS = [
   ['studio/router.ts', 'studio/router.test.cjs'],
   ['studio/command.ts', 'studio/command.test.cjs'],
   ['studio/mission.ts', 'studio/mission.test.cjs'],
+  ['studio/dev-server.ts', 'studio/dev-server.test.cjs'],
+  // Agent task records: checklist derivation, search, filters and the review
+  // packet. All pure, so every awkward case is a test rather than a hope.
+  ['studio/records.ts', 'studio/records.test.cjs'],
+  ['studio/packet.ts', 'studio/packet.test.cjs'],
+  ['studio/record-seeds.ts', 'studio/record-seeds.test.cjs'],
+  // The IPC registrar. Bundled so a test can assert every studio-* channel is
+  // registered — this app has twice shipped a view whose only symptom was
+  // "No handler registered", and Studio now owns forty of them.
+  ['studio/index.ts', 'studio/register.test.cjs'],
   // The adapter registry is only populated as a side effect of importing each
   // adapter, so the entry re-exports the registry *and* imports all four.
   [null, 'studio/adapters.test.cjs', path.join(HERE, 'adapters-entry.ts')],
@@ -70,7 +80,12 @@ const RENDERER_TARGETS = [
   ['components/studio/viewport-cull.ts', 'studio/viewport-cull.test.cjs'],
   // The settings registry is deliberately free of React and electron imports
   // so it can be bundled and asserted here. See its header comment.
-  ['components/settings/settingsRegistry.ts', 'renderer/settings-registry.test.cjs']
+  ['components/settings/settingsRegistry.ts', 'renderer/settings-registry.test.cjs'],
+  // The tutorial's placement maths and its content. Both are deliberately free
+  // of React and the DOM so a card that would render off-screen, or a tour with
+  // a missing Hindi string, is a test rather than something a user finds.
+  ['tutorial/types.ts', 'renderer/tutorial-types.test.cjs'],
+  ['tutorial/content.ts', 'renderer/tutorial-content.test.cjs']
 ]
 
 /** Entry paths resolved up front so cwd never matters. */

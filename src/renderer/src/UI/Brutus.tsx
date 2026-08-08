@@ -14,6 +14,8 @@ import ViewSkeleton from '@renderer/components/ViewSkelrton'
 import AppBackground from '@renderer/components/AppBackground'
 import SettingsModal from '@renderer/components/settings/SettingsModal'
 import { openSettings } from '@renderer/components/settings/open-settings'
+import { TutorialButton } from '@renderer/tutorial/TutorialProvider'
+import { useTutorial } from '@renderer/tutorial/context'
 import { Tooltip, cn } from '@renderer/components/ui'
 import { avatarClass, useProfileStore } from '@renderer/store/profile-store'
 import { useAuthStore } from '@renderer/store/auth-store'
@@ -71,6 +73,18 @@ const glassPanel = 'bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounde
 
 const Brutus = (props: BrutusProps): React.JSX.Element => {
   const [activeTab, setActiveTab] = useState('DASHBOARD')
+
+  /**
+   * Keep the tutorial pointed at whatever is on screen.
+   *
+   * The provider owns the tours because the welcome one points at the nav,
+   * which no single view owns; this is the only place that knows which feature
+   * is showing.
+   */
+  const { setFeature: setTutorialFeature } = useTutorial()
+  useEffect(() => {
+    setTutorialFeature(activeTab)
+  }, [activeTab, setTutorialFeature])
   // Typed from what the services actually return rather than `any` — both
   // already declare their shapes, so this cost nothing and gives the dashboard
   // props real checking.
@@ -162,6 +176,7 @@ const Brutus = (props: BrutusProps): React.JSX.Element => {
             brand and the right-hand cluster happen to be. */}
         <nav
           aria-label="Main"
+          data-tour="nav.tabs"
           className="absolute left-1/2 hidden h-full -translate-x-1/2 items-stretch md:flex"
         >
           {TABS.map((tab) => {
@@ -169,6 +184,7 @@ const Brutus = (props: BrutusProps): React.JSX.Element => {
             return (
               <button
                 key={tab.id}
+                data-tour={`nav.${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
@@ -227,6 +243,11 @@ const Brutus = (props: BrutusProps): React.JSX.Element => {
               <RiNodeTree className="text-[15px]" />
             </button>
           </Tooltip>
+          {/* The tour for whatever is on screen. Renders nothing on a feature
+              that has no tour, rather than a dead button that teaches people
+              the help here is unreliable. */}
+          <TutorialButton className="p-2" />
+
           <Tooltip label="Settings — Ctrl+," side="bottom">
             <button
               onClick={openSettings}

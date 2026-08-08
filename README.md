@@ -11,7 +11,7 @@
 
 **Brutus does not answer questions. It runs a workforce.**
 
-Real coding agents on a canvas, wired to each other. Eight LLM specialists working a task in parallel. An inbox that triages itself. A voice loop that runs with the network unplugged. A robot face that lip-syncs the reply. One engine, one policy layer, one place to watch it all happen.
+Real coding agents on a canvas, wired to each other. Eight LLM specialists working a task in parallel. An inbox that triages itself. A voice loop that runs with the network unplugged. A robot face that lip-syncs the reply. One engine, one policy layer, one searchable record of everything it did.
 
 <br/>
 
@@ -22,7 +22,7 @@ Real coding agents on a canvas, wired to each other. Eight LLM specialists worki
 [![Electron](https://img.shields.io/badge/Electron%2041-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org)
 [![React](https://img.shields.io/badge/React%2019-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/tests-454%20passing-16A34A?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-996%20passing-16A34A?style=flat-square)](#testing)
 [![License](https://img.shields.io/badge/License-MIT-EAB308?style=flat-square)](LICENSE)
 
 <br/>
@@ -50,6 +50,7 @@ Real coding agents on a canvas, wired to each other. Eight LLM specialists worki
 * [Desk — the inbox that runs itself](#-desk--the-inbox-that-runs-itself)
 * [Voice and the face](#-voice-and-the-face)
 * [Macros — the visual workflow builder](#-macros--the-visual-workflow-builder)
+* [Learn it in place — the guided tour](#-learn-it-in-place--the-guided-tour)
 
 **Everything else it does**
 * [The full capability catalogue](#the-full-capability-catalogue)
@@ -97,7 +98,7 @@ Four independent systems share one policy layer, one memory, one voice and one f
 
 | | Engine | What it orchestrates | The unit of work |
 |:--:|:--|:--|:--|
-| 🎛️ | **[Studio](#-studio--the-agent-canvas)** | Real coding-agent CLIs as live terminals on a canvas | A **workspace** — agents wired together, running for as long as the job takes |
+| 🎛️ | **[Studio](#-studio--the-agent-canvas)** | Real coding-agent CLIs as live terminals on a canvas | A **workspace** — agents wired together, running for as long as the job takes, and a searchable **record** of what they did |
 | 🧠 | **[Orchestrator](#-orchestrator--eight-specialists-in-parallel)** | Eight LLM specialists across four providers, in parallel | A **run** — one request, planned, fanned out, criticised, synthesised |
 | 📬 | **[Desk](#-desk--the-inbox-that-runs-itself)** | Your Gmail inbox, continuously | A **cycle** — triage, draft, hold for approval, track commitments |
 | 🎙️ | **[Voice](#-voice-and-the-face)** | 121 tools across your machine, phone and robots | A **turn** — you speak, it acts, the face reacts |
@@ -155,7 +156,7 @@ Every window is a **real pseudo-terminal running the real binary**. Claude Code 
 |:--|:--|
 | **Agent** | Claude Code, Codex, or Gemini CLI in a live terminal, with a setup card for run mode and working directory |
 | **Terminal** | A plain shell for the things that surround agents — dev servers, test watchers, git, builds |
-| **Preview** | A live frame on whatever an agent just started serving. Detected from its output, opened beside it, tethered to it |
+| **Preview** | A live frame on whatever an agent just built — a dev server caught from its output, or an HTML file it wrote. Opened beside it, tethered to it, and it follows the agent's edits |
 | **Note** | A sticky note, because a canvas of autonomous processes needs somewhere to write down what you are actually trying to do |
 
 Edges are real data flow, not decoration:
@@ -177,7 +178,7 @@ wire the reviewer back into the builder, revise until the tests pass
 
 The model proposes; a validator disposes. Unknown agent kinds are dropped, agents that are not installed are dropped, references that resolve to nothing are dropped, self-links are dropped, and the batch is capped. A hallucinated node id costs one skipped operation instead of a corrupted workspace.
 
-**3. Brief it.** The Dashboard turns one sentence into a crew that actually runs:
+**3. Brief it.** The Dashboard turns one sentence into a crew that actually runs — type it, or dictate it with the microphone:
 
 ```
 "add dark mode to the settings page and make sure nothing else broke"
@@ -188,6 +189,41 @@ The model proposes; a validator disposes. Unknown agent kinds are dropped, agent
 ```
 
 Every step is tracked from dispatch to done, and every transition lands in Activity.
+
+**You are never asked how many agents to use.** A complexity estimator reads the request and sets the floor — a trivial job may run as one agent, anything real gets at least two. Crew size is a judgement about the work, not a number a person should have to guess at.
+
+### Before you press Run: the source checklist
+
+Sitting directly above the Run button is a derived list of **what this task still needs** — the schema it will want, the file it should read, the URL it has no way to know.
+
+It sits there rather than in Settings for one reason: the moment it is useful is the moment *before* you commit. Once several CLI processes are editing files, *"you never told it which database"* is an expensive thing to discover.
+
+**An unticked item never blocks Run.** The list is derived from what the request appears to touch, so it is sometimes wrong — asking for a schema on a task that only reads one. A checklist that can refuse to let you work is a checklist people learn to defeat rather than use. It warns clearly, then gets out of the way. Whatever you tick is carried into the task record, so the answers survive the run.
+
+### Records: what the agents actually did
+
+A mission used to leave no trace. The tracker lived in a `Map` and died with the process, so once a crew finished there was nothing to search, nothing to review, and nothing to hand to anyone else.
+
+Now every agent task writes a **record**: what was asked, what each agent produced, what the task still needs, and whatever you wrote about it afterwards. The Dashboard has a second tab for them, with full-text search, filters, and per-record checklists.
+
+| | |
+|:--|:--|
+| **Stored** | The facts — the task, the sections, the checklist ticks, your notes |
+| **Derived on read** | Every judgement about them — is it complete, what is missing, what looks wrong |
+
+That split matters: deriving the verdicts means a record written by an older build cannot carry a stale one, and there is exactly one definition of *"incomplete"* rather than one per writer.
+
+**Review packets.** Export any record as a **Markdown** document and a **JSON** file, produced by one function so the two cannot disagree about what happened — the classic failure mode of generating a report and an export separately. Markdown is what a person reviews: it opens anywhere, prints, and pastes into a ticket. JSON is what a script checks.
+
+The caveats are deliberately placed **above** the output they qualify. A reader who reaches the sections first has already started believing them; what is missing and what went wrong belong before the thing being caveated, not in an appendix.
+
+<details>
+<summary><b>Why an empty Records panel ships with three sample runs</b></summary>
+
+Search, filters, the missing-data flag, the validation warnings and the export are all invisible on an empty store. Someone opening Records for the first time would see a blank panel with no way to tell whether the feature works or is simply new.
+
+Silently mixing fabricated runs into someone's real history would be indefensible — the whole point of a record is that it says what actually happened. So the samples are seeded **only** into a completely empty store, every one carries `sample: true`, the panel badges them as samples, and clearing them is one click. The three are chosen to cover the three states the UI has to render: a clean complete run, one with missing data, and one that failed.
+</details>
 
 ### The policy engine
 
@@ -255,9 +291,35 @@ A cascade is one human prompt and everything it sets off. Loop counts are tracke
 </details>
 
 <details>
-<summary><b>Previews are loopback-only</b></summary>
+<summary><b>Typing a prompt is two keystrokes, not one string</b></summary>
+
+Writing `"do the thing\r"` into an agent's terminal in a single call does **not** submit it, and the symptom is maddening: the prompt sits in the input box, typed but never sent, waiting for a human to press Enter.
+
+Claude Code and Codex are Ink applications, and Ink hands its `useInput` handler whatever arrived in **one read of the pty** as a single event. One write is one read, so the handler sees one keypress whose text happens to end in a carriage return — and appends the lot to the input box.
+
+Written separately, with a short gap, the `\r` lands in its own read and therefore its own input event, which every one of these CLIs reads as the Enter key. Brutus also waits for the CLI to actually report idle before typing, because a prompt sent into a booting agent is dropped on the floor.
+</details>
+
+<details>
+<summary><b>Previews are loopback-only, and port-filtered</b></summary>
 
 An agent's output is untrusted: it contains whatever the agent just read, including file contents and web pages. A URL harvested from that stream gets loaded in a frame inside Brutus, so anything but a loopback host is refused outright — a README mentioning `https://evil.example` must never become a live frame. The frame is sandboxed without top-level navigation, so a redirect in a preview cannot steer the Brutus window.
+
+Three further rules, each earned:
+
+* **Ignored ports.** Inspectors, language servers and Brutus's own policy hook are the things a coding agent's tooling routinely mentions. Opening a frame on any of them shows a blank page at best.
+* **A carried tail.** A pty delivers output in arbitrary slices, so a URL can be split down the middle and never match. 256 bytes of the previous chunk are kept so it does.
+* **A port is required.** A bare `http://localhost` with no port is far more often prose in a README than a running server, and guessing `80` would open a frame on whatever else happens to be listening.
+</details>
+
+<details>
+<summary><b>Not every result is a dev server</b></summary>
+
+An agent asked for one static page starts no server at all, so there is no URL to catch. But the policy layer already inspects every file an agent writes — so that is what feeds the other half of *"show me what was built"*, and a preview window opens on the HTML file directly.
+
+HTML only. Pointing a preview frame at a `.ts` or a `.json` shows the browser's idea of plain text, which is worse than showing nothing because it looks like the feature is broken.
+
+The header says which kind you are looking at, because the difference matters: a dev server reloads itself when the agent edits, and a static file cannot. So main watches the file and tells the window when it changed — without that, the window froze on whatever the agent wrote first, and the second pass, usually the good one, was invisible until you clicked reload.
 </details>
 
 <details>
@@ -410,9 +472,38 @@ Six categories — **Triggers**, **System**, **Automation**, **Web Intelligence*
 
 ---
 
+# 🎓 Learn it in place — the guided tour
+
+An engine this wide is hard to hand to someone. So Brutus teaches itself: a **help button that knows which screen you are on** and walks you through it, pointing at the real controls.
+
+**Nine tours**, one per feature:
+
+| Tour | Covers |
+|:--|:--|
+| **Welcome** | The nav, and what Studio and Desk are for |
+| **Studio launcher** | Workspaces, cloning, and handing one over |
+| **Studio canvas** | Dashboard, briefing, dictation, auto-route, agents, autonomy, the command bar, Activity, previews, the checklist, and Records with its search and export |
+| **Desk** | The three lanes, and the kill switch |
+| **Agents** | The specialists and the approval gate |
+| **Phone · Robot · Notes · Macros** | The rest of the surface |
+
+**Both languages, always.** Every string exists in English *and* Hindi — a half-translated tour is worse than none, so the type system requires both.
+
+<details>
+<summary><b>Why tour steps point at <code>data-tour</code> attributes instead of CSS selectors</b></summary>
+
+A tour written against `.studio-glass > button:nth-child(3)` breaks the first time someone restyles a bar, and it breaks **silently** — the step simply points at nothing.
+
+`data-tour="studio.dashboard"` is a contract instead: it is greppable, it survives restyling, and a test asserts that every step's anchor actually exists in the source. That test earned its place immediately — it caught an anchor that was being assembled at runtime, which no amount of reading the source could have found.
+
+The placement maths is kept free of React, Electron and the DOM so it can be tested exhaustively, because placement *is* the whole difficulty of a guided tour: a card that covers the thing it is describing, or hangs off the edge of the window, is worse than no tour at all.
+</details>
+
+---
+
 ## The full capability catalogue
 
-Beyond the four engines, Brutus carries a large tool layer — **121 voice-callable tools** across more than 230 allowlisted IPC channels. Grouped by what they touch:
+Beyond the four engines, Brutus carries a large tool layer — **121 voice-callable tools** across more than 240 allowlisted IPC channels. Grouped by what they touch:
 
 <details open>
 <summary><b>Files, disks and documents</b></summary>
@@ -451,6 +542,7 @@ Beyond the four engines, Brutus carries a large tool layer — **121 voice-calla
 | **GraphRAG** | Vector chunk retrieval joined with graph-neighbourhood facts |
 | **Graph tools** | Entity lookup · path-finding between entities · P&ID engineering-drawing parser · Obsidian vault import · export |
 | **Memory** | Permanent core memories (save/retrieve/forget) · persistent chat history · commitment tracking |
+| **Agent records** | Every Studio task persisted and full-text searchable · derived completeness and validation warnings · review packets exported as Markdown and JSON |
 
 </details>
 
@@ -519,7 +611,7 @@ Three Electron layers, and a hard rule between them.
 │                                                                         │
 │   Home   Desk   Macros   Apps   Notes   Gallery   Phone   Agents        │
 │                            Studio   Robot                               │
-│   BrutusEyes (face)   ·   14 widgets   ·   design-system primitives     │
+│   BrutusEyes (face)  ·  14 widgets  ·  9 guided tours  ·  UI primitives │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
                   ╔═════════════▼═════════════╗
@@ -530,7 +622,8 @@ Three Electron layers, and a hard rule between them.
 ┌───────────────────────────────▼─────────────────────────────────────────┐
 │  MAIN  ·  Node                                                          │
 │                                                                         │
-│   studio/  (23 modules)   pty · policy · router · worktrees · missions  │
+│   studio/  (26 modules)   pty · policy · router · worktrees · missions  │
+│                           records · review packets · preview detection  │
 │   orchestrator/ (12)      planner · scheduler · key pool · capabilities │
 │   coo/  (7)               Desk engine · rails · triage · audit          │
 │   voice/                  on-device Whisper ASR                         │
@@ -809,11 +902,12 @@ The PC now reaches the board at `http://localhost:8081/v1` — the same OpenAI-s
 
 ### 5. Studio's first workspace
 
-1. Open the **Studio** tab.
+1. Open the **Studio** tab. Press the help button for the guided tour if you want it.
 2. **Open folder** on a project you have, or **Clone repo** from a URL.
 3. Click an agent on the dock. Pick a run mode and working directory, press start.
 4. Drag from its right-hand dot to another agent to wire a handoff.
 5. Type into a terminal yourself, or use the command bar, or open the **Dashboard** and brief a whole crew.
+6. Glance at the **source checklist** above Run, then go. Afterwards, the **Records** tab has the whole run.
 
 **Recommended first settings:** autonomy on **Guarded**, worktree isolation **on**. Move to Autonomous only with worktrees enabled.
 
@@ -858,9 +952,11 @@ npm run fetch:models # re-download the bundled Whisper model
 
 **Try these:**
 
+* *Start with the tour* — hit the help button on any screen. It knows where you are, and it speaks English or Hindi.
 * *Voice* — press the red button and just talk. Ask it to read your screen, then to open something.
-* *Studio* — brief the Dashboard with **"add a health check endpoint and make sure the tests still pass"**, then watch three agents pick it up.
-* *Studio previews* — tell an agent to start the dev server. A live frame opens beside its terminal, tethered to it.
+* *Studio* — brief the Dashboard with **"add a health check endpoint and make sure the tests still pass"**, then watch the crew pick it up. Check the source checklist before you press Run.
+* *Studio previews* — tell an agent to build a landing page. A live frame opens beside its terminal and follows every edit — whether it started a dev server or just wrote an HTML file.
+* *Studio records* — open the **Records** tab after a run, search it, then export a review packet.
 * *Orchestrator* — type **`/agent compare our last three deploys and tell me what regressed`** anywhere in chat.
 * *Desk* — turn on drafting-only, hit **Run now**, and read what it *would* have sent.
 * *Prove the edge point* — turn Brain Node routing on, pull the network, keep talking.
@@ -869,11 +965,12 @@ npm run fetch:models # re-download the bundled Whisper model
 
 ## Testing
 
-454 tests, headless, no Electron and no network. They run under plain node in a few seconds.
+**996 tests**, headless, no Electron and no network. They run under plain node in a few seconds.
 
 ```bash
 npm test                  # everything
-npm run test:studio       # pty, adapters, policy, router, worktrees, missions
+npm run test:studio       # pty, adapters, policy, router, worktrees, missions,
+                          #   previews, records, IPC registration
 npm run test:orchestrator # key pool, capability bus, planner, runner, scheduler
 npm run test:desk         # rails, triage, store, Gmail MIME
 npm run test:voice        # on-device ASR and the model store
@@ -891,6 +988,9 @@ Main-process modules import `electron`, which does not exist outside the Electro
 * two concurrent agents queue independently and each gets its own answer
 * the policy server binds localhost only and rejects requests without its bearer token
 * every channel the renderer invokes is allowlisted in preload **and** has a handler in main
+* a non-loopback or ignored-port URL never becomes a preview frame
+* a record's verdicts are derived, so an old record cannot carry a stale one
+* every tutorial step's `data-tour` anchor exists in the source, in both languages
 
 Also useful:
 
@@ -908,7 +1008,7 @@ Brutus/
 ├── src/
 │   ├── main/                          Electron main process (Node)
 │   │   ├── services/
-│   │   │   ├── studio/                🎛️  THE AGENT CANVAS — 23 modules
+│   │   │   ├── studio/                🎛️  THE AGENT CANVAS — 26 modules
 │   │   │   │   ├── index.ts             service entry, IPC surface
 │   │   │   │   ├── pty-manager.ts       every real pseudo-terminal
 │   │   │   │   ├── policy.ts            allow / deny / ask — safety critical
@@ -917,9 +1017,12 @@ Brutus/
 │   │   │   │   ├── prompt-watch.ts      the pattern track
 │   │   │   │   ├── router.ts            handoff · branch · loop
 │   │   │   │   ├── mission.ts           one sentence → a running crew
+│   │   │   │   ├── records.ts           persistent task records + search
+│   │   │   │   ├── packet.ts            review packets (markdown + json)
+│   │   │   │   ├── record-seeds.ts      honest, badged sample records
 │   │   │   │   ├── worktree.ts          per-agent git isolation
 │   │   │   │   ├── terminal-screen.ts   what the human actually saw
-│   │   │   │   ├── dev-server.ts        loopback preview detection
+│   │   │   │   ├── dev-server.ts        preview detection: servers + files
 │   │   │   │   ├── telemetry.ts         events, spans, traces
 │   │   │   │   └── adapters/            claude · codex · gemini · shell
 │   │   │   ├── orchestrator/          🧠  MULTI-AGENT — 12 modules
@@ -940,14 +1043,21 @@ Brutus/
 │   └── renderer/src/                  React 19
 │       ├── views/                     Studio · Orchestrator · Desk · Dashboard …
 │       ├── components/
-│       │   ├── studio/                20 canvas components
+│       │   ├── studio/                22 canvas components
+│       │   │   ├── RecordsPanel.tsx     searchable task history
+│       │   │   ├── SourceChecklist.tsx  what the task still needs
+│       │   │   └── …                    nodes, terminals, approval, dock
 │       │   ├── settings/              registry + 15 panels
 │       │   ├── BrutusEyes/            the animated face
 │       │   └── ui/                    design-system primitives
+│       ├── tutorial/                  🎓  9 bilingual guided tours
+│       │   ├── content.ts               every tour, en + hi
+│       │   ├── types.ts                 shapes + placement maths (pure)
+│       │   └── TourOverlay.tsx          the card, anchored to data-tour
 │       ├── services/                  voice engine · studio client · theme
 │       ├── Widgets/                   14 dashboard widgets
 │       └── tools/  functions/         renderer-side tool APIs
-├── tests/                             454 headless tests
+├── tests/                             996 headless tests
 ├── arduino/                           robot firmware
 ├── resources/models/                  bundled Whisper base.en
 └── assets/                            screenshots, firmware, 3D model
@@ -971,7 +1081,9 @@ Brutus/
 
 * **One contract, many brains.** Every brain emits the same event shapes and the same `[EMOTION:xxx]` tag, so the face, the tools and the robot never care which is running. That is what lets an Uno Q or a phone model stand in for a cloud model with no code change.
 * **Graceful degradation everywhere.** A Brain Node missing a model reports `degraded` and serves the rest. A web API timing out hands off to the reflex brain. A render error in one agent window is contained to that window rather than taking the app down.
-* **The code explains itself where it matters.** The policy engine, the router, the terminal-screen reconstruction, the key pool and Desk's rails all carry comments about *why* — including the approaches that were tried and rejected, and the bugs that motivated the current shape.
+* **Facts are stored, judgements are derived.** Records keep what happened and compute every verdict about it on read. A record written by an older build therefore cannot carry a stale conclusion, and *"incomplete"* has exactly one definition rather than one per writer.
+* **Nothing fabricated is passed off as real.** The sample records exist so an empty Records panel is not indistinguishable from a broken one — and every one of them is flagged, badged and removable in a click. A record's only value is that it says what actually happened.
+* **The code explains itself where it matters.** The policy engine, the router, the terminal-screen reconstruction, the key pool, Desk's rails and the records store all carry comments about *why* — including the approaches that were tried and rejected, and the bugs that motivated the current shape.
 * **`adb forward` is not permanent.** Re-run it after any replug, or put it in a startup script.
 
 ---

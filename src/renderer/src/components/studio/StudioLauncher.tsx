@@ -162,7 +162,7 @@ export default function StudioLauncher({ onOpen }: { onOpen: (id: string) => voi
 
         {/* ── Open or create ── */}
         <h2 className="mb-3 text-[13px] font-semibold text-zinc-200">Open or create</h2>
-        <div className="flex flex-wrap gap-2">
+        <div data-tour="launcher.actions" className="flex flex-wrap gap-2">
           {actions.map((a) => (
             <button
               key={a.id}
@@ -185,7 +185,7 @@ export default function StudioLauncher({ onOpen }: { onOpen: (id: string) => voi
         )}
 
         {/* ── Recent ── */}
-        <div className="mb-3 mt-10 flex items-baseline gap-2">
+        <div data-tour="launcher.list" className="mb-3 mt-10 flex items-baseline gap-2">
           <h2 className="text-[13px] font-semibold text-zinc-200">Recent</h2>
           {!loading && <span className="text-[11px] text-zinc-600">· {workspaces.length}</span>}
         </div>

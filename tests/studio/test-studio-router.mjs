@@ -326,7 +326,11 @@ async function pump(r, delivered, seedSession, seedOutput, maxTurns = 80) {
   await runTurn(r, 's1', 'Added the dark-mode toggle in theme.ts')
   ok('a real turn does route', delivered.length === 1)
   ok('handoff lands in the downstream session', delivered[0]?.sessionId === 's2')
-  ok('delivered text ends with Enter', delivered[0]?.text.endsWith('\r'))
+  ok(
+    'delivered text carries no Enter of its own',
+    !delivered[0]?.text.includes('\r'),
+    JSON.stringify(delivered[0]?.text.slice(-12))
+  )
   ok('delivered text is one line', delivered[0]?.text.split('\n').length === 1)
   ok(
     'the upstream output reached the reframer',

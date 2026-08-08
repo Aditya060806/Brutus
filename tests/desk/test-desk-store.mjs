@@ -42,7 +42,10 @@ const fileFor = (name) => path.join(DIR, `${name}.json`)
 
 // ═══ 2. Degrading instead of throwing ═════════════════════════════════════
 
-ok('a missing file returns the fallback', store.readJson('does-not-exist', 'fallback') === 'fallback')
+ok(
+  'a missing file returns the fallback',
+  store.readJson('does-not-exist', 'fallback') === 'fallback'
+)
 
 {
   fs.writeFileSync(fileFor('corrupt'), '{"half":')
@@ -71,17 +74,15 @@ ok('a missing file returns the fallback', store.readJson('does-not-exist', 'fall
   ok('a rewrite fully replaces the previous contents', store.readJson('atomic', null)?.v === 2)
 
   const leftovers = fs.readdirSync(DIR).filter((f) => f.endsWith('.tmp'))
-  ok(
-    'no .tmp files are left behind',
-    leftovers.length === 0,
-    `found: ${leftovers.join(', ')}`
-  )
+  ok('no .tmp files are left behind', leftovers.length === 0, `found: ${leftovers.join(', ')}`)
 }
 
 {
   // A partially-written file must never be readable as valid-but-truncated.
   // The temp+rename means a reader sees the OLD file until the new one is whole.
-  store.writeJson('big', { rows: Array.from({ length: 2000 }, (_, i) => ({ i, pad: 'x'.repeat(50) })) })
+  store.writeJson('big', {
+    rows: Array.from({ length: 2000 }, (_, i) => ({ i, pad: 'x'.repeat(50) }))
+  })
   const read = store.readJson('big', { rows: [] })
   ok('a large write round-trips completely', read.rows.length === 2000)
   ok('the last row survived', read.rows[1999].i === 1999)
@@ -102,7 +103,10 @@ ok('a missing file returns the fallback', store.readJson('does-not-exist', 'fall
   const merged = store.getConfig()
   ok('a partial config keeps the stored value', merged.level === 'autonomous')
   ok('a partial config gains missing defaults', typeof merged.maxSendsPerDay === 'number')
-  ok('no key is undefined after the merge', Object.values(merged).every((v) => v !== undefined))
+  ok(
+    'no key is undefined after the merge',
+    Object.values(merged).every((v) => v !== undefined)
+  )
 
   store.setConfig({ level: 'off' })
   ok('setConfig persists', store.getConfig().level === 'off')
@@ -135,7 +139,14 @@ ok('a missing file returns the fallback', store.readJson('does-not-exist', 'fall
 // ═══ 6. Commitments, and not repeating them ═══════════════════════════════
 
 {
-  const base = { id: 'c1', text: 'Send the quote', owedBy: 'us', dueAt: null, threadId: 't1', createdAt: 1 }
+  const base = {
+    id: 'c1',
+    text: 'Send the quote',
+    owedBy: 'us',
+    dueAt: null,
+    threadId: 't1',
+    createdAt: 1
+  }
   store.addCommitment(base)
   ok('a commitment is stored', store.getCommitments().length === 1)
 
@@ -148,7 +159,10 @@ ok('a missing file returns the fallback', store.readJson('does-not-exist', 'fall
   ok('dedupe ignores case and spacing', store.getCommitments().length === 1)
 
   store.addCommitment({ ...base, id: 'c4', threadId: 't2' })
-  ok('the same text on a DIFFERENT thread is a separate promise', store.getCommitments().length === 2)
+  ok(
+    'the same text on a DIFFERENT thread is a separate promise',
+    store.getCommitments().length === 2
+  )
 
   store.addCommitment({ ...base, id: 'c5', dueAt: 999 })
   ok('the same text with a different due date is separate', store.getCommitments().length === 3)
@@ -177,12 +191,21 @@ ok('a missing file returns the fallback', store.readJson('does-not-exist', 'fall
   ok('blank and malformed entries are skipped', store.getCommitments().length === 2)
   ok('a legacy due date is parsed', store.getCommitments()[0].dueAt === Date.parse('2026-09-01'))
   ok('a missing due date becomes null', store.getCommitments()[1].dueAt === null)
-  ok('imported entries are tagged legacy', store.getCommitments().every((c) => c.legacy === true))
+  ok(
+    'imported entries are tagged legacy',
+    store.getCommitments().every((c) => c.legacy === true)
+  )
 
-  ok('running the migration again imports nothing', store.migrateLegacyCommitments(legacyPath) === 0)
+  ok(
+    'running the migration again imports nothing',
+    store.migrateLegacyCommitments(legacyPath) === 0
+  )
   ok('and does not duplicate', store.getCommitments().length === 2)
 
-  ok('a missing legacy file imports nothing', store.migrateLegacyCommitments(path.join(DIR, 'nope.json')) === 0)
+  ok(
+    'a missing legacy file imports nothing',
+    store.migrateLegacyCommitments(path.join(DIR, 'nope.json')) === 0
+  )
 
   fs.writeFileSync(path.join(DIR, 'bad-legacy.json'), 'not json')
   ok(

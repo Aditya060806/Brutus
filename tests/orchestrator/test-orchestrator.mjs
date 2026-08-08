@@ -35,10 +35,14 @@ const cyclic = validatePlan({
 })
 ok('cycle rejected', cyclic.ok === false && /cycle/i.test(cyclic.error), cyclic.error)
 
-const selfLoop = validatePlan({ tasks: [{ id: 'a', agent: 'analyst', goal: 'g', dependsOn: ['a'] }] })
+const selfLoop = validatePlan({
+  tasks: [{ id: 'a', agent: 'analyst', goal: 'g', dependsOn: ['a'] }]
+})
 ok('self-dependency rejected', selfLoop.ok === false)
 
-const dangling = validatePlan({ tasks: [{ id: 'a', agent: 'analyst', goal: 'g', dependsOn: ['zz'] }] })
+const dangling = validatePlan({
+  tasks: [{ id: 'a', agent: 'analyst', goal: 'g', dependsOn: ['zz'] }]
+})
 ok('dangling dependency rejected', dangling.ok === false && /unknown task/i.test(dangling.error))
 
 const badAgent = validatePlan({ tasks: [{ id: 'a', agent: 'wizard', goal: 'g', dependsOn: [] }] })
@@ -56,14 +60,14 @@ ok('empty plan rejected', validatePlan({ tasks: [] }).ok === false)
 // ═══ 2. Approval gate (safety-critical) ═══════════════════════════════════
 bus._resetRegistryForTests()
 let sendCount = 0
+bus.defineCapability({ name: 'send-thing', tags: ['external'], description: 'sends' }, async () => {
+  sendCount++
+  return 'sent'
+})
 bus.defineCapability(
-  { name: 'send-thing', tags: ['external'], description: 'sends' },
-  async () => {
-    sendCount++
-    return 'sent'
-  }
+  { name: 'read-thing', tags: ['read'], description: 'reads' },
+  async () => 'data'
 )
-bus.defineCapability({ name: 'read-thing', tags: ['read'], description: 'reads' }, async () => 'data')
 
 const r1 = await bus.runCapability('read-thing', {}, { autonomy: 'guarded' })
 ok('read capability runs without approval', r1.ok === true)
@@ -72,39 +76,59 @@ const r2 = await bus.runCapability('send-thing', { to: 'a@b.c' }, { autonomy: 'g
 ok('external capability BLOCKED without token', r2.ok === false && r2.needsApproval === true)
 ok('blocked capability did not execute', sendCount === 0)
 
-const r3 = await bus.runCapability('send-thing', { to: 'a@b.c' }, {
-  autonomy: 'guarded',
-  approvalToken: 'forged-token'
-})
+const r3 = await bus.runCapability(
+  'send-thing',
+  { to: 'a@b.c' },
+  {
+    autonomy: 'guarded',
+    approvalToken: 'forged-token'
+  }
+)
 ok('forged token rejected', r3.ok === false && r3.needsApproval === true && sendCount === 0)
 
 bus.grantApproval('tok1', 'send-thing', { to: 'a@b.c' })
-const r4 = await bus.runCapability('send-thing', { to: 'a@b.c' }, {
-  autonomy: 'guarded',
-  approvalToken: 'tok1'
-})
+const r4 = await bus.runCapability(
+  'send-thing',
+  { to: 'a@b.c' },
+  {
+    autonomy: 'guarded',
+    approvalToken: 'tok1'
+  }
+)
 ok('valid token permits execution', r4.ok === true && sendCount === 1)
 
-const r5 = await bus.runCapability('send-thing', { to: 'a@b.c' }, {
-  autonomy: 'guarded',
-  approvalToken: 'tok1'
-})
+const r5 = await bus.runCapability(
+  'send-thing',
+  { to: 'a@b.c' },
+  {
+    autonomy: 'guarded',
+    approvalToken: 'tok1'
+  }
+)
 ok('token is SINGLE USE', r5.ok === false && sendCount === 1)
 
 // Token bound to args: approving one email must not authorise a different one.
 bus.grantApproval('tok2', 'send-thing', { to: 'alice@x.com' })
-const r6 = await bus.runCapability('send-thing', { to: 'EVIL@attacker.com' }, {
-  autonomy: 'guarded',
-  approvalToken: 'tok2'
-})
+const r6 = await bus.runCapability(
+  'send-thing',
+  { to: 'EVIL@attacker.com' },
+  {
+    autonomy: 'guarded',
+    approvalToken: 'tok2'
+  }
+)
 ok('token bound to exact args (cannot swap recipient)', r6.ok === false && sendCount === 1)
 
 // Arg order must not matter for a legitimate match.
 bus.grantApproval('tok3', 'send-thing', { to: 'a@b.c', subject: 's' })
-const r7 = await bus.runCapability('send-thing', { subject: 's', to: 'a@b.c' }, {
-  autonomy: 'guarded',
-  approvalToken: 'tok3'
-})
+const r7 = await bus.runCapability(
+  'send-thing',
+  { subject: 's', to: 'a@b.c' },
+  {
+    autonomy: 'guarded',
+    approvalToken: 'tok3'
+  }
+)
 ok('arg order does not break a valid token', r7.ok === true && sendCount === 2)
 
 const r8 = await bus.runCapability('send-thing', { to: 'x' }, { autonomy: 'autonomous' })
@@ -174,7 +198,13 @@ ok(
 
 // ═══ 4. Scheduler: parallelism, ordering, degradation ═════════════════════
 function makeRun(tasks) {
-  return { id: 'r1', request: 'q', status: 'running', tasks: planToTasks({ objective: 'o', tasks }), startedAt: Date.now() }
+  return {
+    id: 'r1',
+    request: 'q',
+    status: 'running',
+    tasks: planToTasks({ objective: 'o', tasks }),
+    startedAt: Date.now()
+  }
 }
 const noopHooks = () => ({
   onTaskUpdate: () => {},
@@ -186,7 +216,13 @@ const noopHooks = () => ({
 // runAgentTask, so we test timing through a router whose completions sleep.
 const timeline = []
 const fakeRouter = {
-  complete: async () => ({ text: 'done', provider: 'test', model: 'test', attempts: [], elapsedMs: 1 }),
+  complete: async () => ({
+    text: 'done',
+    provider: 'test',
+    model: 'test',
+    attempts: [],
+    elapsedMs: 1
+  }),
   completeJson: async () => ({ data: { pass: true, reason: 'ok' }, meta: {} })
 }
 
@@ -195,7 +231,15 @@ const parallelRun = makeRun([
   { id: 'a', agent: 'analyst', goal: 'A', dependsOn: [] },
   { id: 'b', agent: 'analyst', goal: 'B', dependsOn: [] }
 ])
-const cfg = { concurrency: 3, autonomy: 'guarded', maxToolIterations: 2, groqKeys: [], tavilyKey: '', hfKey: '', modelOverrides: {} }
+const cfg = {
+  concurrency: 3,
+  autonomy: 'guarded',
+  maxToolIterations: 2,
+  groqKeys: [],
+  tavilyKey: '',
+  hfKey: '',
+  modelOverrides: {}
+}
 
 const slowRouter = {
   complete: async (req) => {
@@ -204,7 +248,13 @@ const slowRouter = {
     await sleep(120)
     timeline.push({ ev: 'end', tag, t: Date.now() })
     // Long enough to clear the critic's minimum-substance guard.
-    return { text: JSON.stringify({ final: 'A complete and substantive answer to the task.' }), provider: 'test', model: 'test', attempts: [], elapsedMs: 120 }
+    return {
+      text: JSON.stringify({ final: 'A complete and substantive answer to the task.' }),
+      provider: 'test',
+      model: 'test',
+      attempts: [],
+      elapsedMs: 120
+    }
   },
   completeJson: async () => ({ data: { pass: true, reason: 'ok' }, meta: {} })
 }
@@ -212,7 +262,10 @@ const slowRouter = {
 const t0 = Date.now()
 await runPlan(parallelRun, slowRouter, cfg, noopHooks())
 const parallelMs = Date.now() - t0
-ok('both independent tasks completed', parallelRun.tasks.every((t) => t.status === 'done'))
+ok(
+  'both independent tasks completed',
+  parallelRun.tasks.every((t) => t.status === 'done')
+)
 ok(
   'independent tasks ran in PARALLEL',
   parallelMs < 220,
@@ -229,13 +282,22 @@ await runPlan(chainRun, slowRouter, cfg, noopHooks())
 const firstEnd = timeline.find((e) => e.ev === 'end' && e.tag.includes('FIRST'))
 const secondStart = timeline.find((e) => e.ev === 'start' && e.tag.includes('SECOND'))
 ok('dependent task waited for its parent', firstEnd && secondStart && secondStart.t >= firstEnd.t)
-ok('chained tasks both done', chainRun.tasks.every((t) => t.status === 'done'))
+ok(
+  'chained tasks both done',
+  chainRun.tasks.every((t) => t.status === 'done')
+)
 
 // A failing task must not kill the run; its dependents are skipped.
 const failRouter = {
   complete: async (req) => {
     if ((req.messages?.[0]?.content || '').includes('BOOM')) throw new Error('agent exploded')
-    return { text: JSON.stringify({ final: 'A complete and substantive answer to the task.' }), provider: 'test', model: 'test', attempts: [], elapsedMs: 1 }
+    return {
+      text: JSON.stringify({ final: 'A complete and substantive answer to the task.' }),
+      provider: 'test',
+      model: 'test',
+      attempts: [],
+      elapsedMs: 1
+    }
   },
   completeJson: async () => ({ data: { pass: true, reason: 'ok' }, meta: {} })
 }
@@ -295,7 +357,11 @@ ok('pacing rotates to a different key', p1.key !== p2.key, `${p1.key} then ${p2.
 ok('both keys used → none ready yet', paced.acquire() === null)
 const pw = paced.msUntilAvailable()
 ok('reports the pacing wait', pw !== null && pw > 0 && pw <= 300, `${pw}ms`)
-ok('pacing is not reported as an error', /throttl/i.test(paced.unavailableReason()), paced.unavailableReason())
+ok(
+  'pacing is not reported as an error',
+  /throttl/i.test(paced.unavailableReason()),
+  paced.unavailableReason()
+)
 await sleep(pw + 60)
 ok('key becomes reusable after the interval', paced.acquire() !== null)
 
@@ -357,7 +423,10 @@ ok(
   callCount <= 5,
   `${callCount} calls made against a budget of 5`
 )
-ok('run still terminates when budget is spent', budgetRun.tasks.every((t) => ['done', 'failed', 'skipped'].includes(t.status)))
+ok(
+  'run still terminates when budget is spent',
+  budgetRun.tasks.every((t) => ['done', 'failed', 'skipped'].includes(t.status))
+)
 
 console.log(`PASS ${PASS.length}`)
 PASS.forEach((p) => console.log(`  ✓ ${p}`))

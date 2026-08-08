@@ -112,35 +112,17 @@ export interface StudioNode {
   /** Auto-reply to connected agents (per-node toggle in the footer). */
   autoReply?: boolean
   /**
-   * Preview nodes only: the dev server this window is pointed at.
+   * Preview nodes only: the dev server, or local page, this window shows.
    *
    * Persisted so a workspace reopened later still shows the frontend beside the
-   * agent that built it. The URL is re-validated as loopback on the way back in
-   * (see `isPreviewUrl`) — a saved file is untrusted input like any other, and
-   * this one ends up in a live frame.
+   * agent that built it. A saved workspace is untrusted input like any other and
+   * this value ends up in a live frame, so it is re-validated on the way back in
+   * by `isLoopbackUrl` in the renderer — the single check that guards the iframe,
+   * kept in one place rather than mirrored here where it could silently drift.
    */
   previewUrl?: string
   /** Preview nodes only: the agent node whose server this is. */
   sourceNodeId?: string
-}
-
-/**
- * Is this a URL a preview window may load?
- *
- * Mirrors `dev-server.ts`'s loopback rule, and exists separately because that
- * check runs on freshly detected output while this one runs on anything a saved
- * or imported workspace claims. Both paths end in an iframe, so both need it.
- */
-export function isPreviewUrl(raw: unknown): raw is string {
-  if (typeof raw !== 'string' || !raw) return false
-  try {
-    const u = new URL(raw)
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
-    const h = u.hostname.toLowerCase()
-    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1' || h === '0.0.0.0'
-  } catch {
-    return false
-  }
 }
 
 /**
@@ -224,8 +206,30 @@ export type StudioEvent =
   | { type: 'approval-required'; approval: StudioApproval }
   | { type: 'approval-resolved'; approvalId: string; granted: boolean }
   | { type: 'routed'; edgeId: string; from: string; to: string; preview: string }
-  /** An agent announced a dev server; the canvas opens a preview window on it. */
-  | { type: 'preview-detected'; sessionId: string; nodeId: string; url: string; port: number }
+  /**
+   * An agent produced something viewable; the canvas opens a window on it.
+   *
+   * `kind` is what stops the two sources fighting. A running dev server always
+   * outranks a static file — an agent that starts a server and then edits a
+   * template must not have its live preview replaced by a `file://` view of the
+   * template it just touched.
+   */
+  | {
+      type: 'preview-detected'
+      sessionId: string
+      nodeId: string
+      url: string
+      port: number
+      kind: 'server' | 'file'
+    }
+  /**
+   * A previewed file changed on disk.
+   *
+   * A dev server reloads itself when the agent edits it; a static page cannot.
+   * Without this the preview shows the agent's first draft forever, and the
+   * feature looks broken the moment the agent improves anything.
+   */
+  | { type: 'preview-changed'; url: string }
   | { type: 'log'; line: string }
   | { type: 'telemetry'; event: TelemetryEvent }
 

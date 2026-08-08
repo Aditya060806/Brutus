@@ -17,7 +17,9 @@ const ok = (n, c, extra = '') => (c ? PASS.push(n) : FAIL.push(`${n}${extra ? ` 
 const {
   MAX_STEPS,
   MIN_STEPS,
+  TRIVIAL_MIN_STEPS,
   MissionTracker,
+  floorFor,
   STALL_AFTER_MS,
   estimateComplexity,
   missionEdges,
@@ -85,7 +87,11 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
     ]
   })
   ok('the surviving step is the installed one', plan?.steps[0].agentKind === 'claude')
-  ok('the drop is explained', skipped.some((s) => s.includes('cursor')), skipped.join('; '))
+  ok(
+    'the drop is explained',
+    skipped.some((s) => s.includes('cursor')),
+    skipped.join('; ')
+  )
 }
 
 {
@@ -96,7 +102,10 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
     ]
   })
   ok('a step with no instruction is dropped', plan?.steps[0].brief === 'real work')
-  ok('an empty brief is explained', skipped.some((s) => /no instruction/i.test(s)))
+  ok(
+    'an empty brief is explained',
+    skipped.some((s) => /no instruction/i.test(s))
+  )
 }
 
 {
@@ -107,7 +116,10 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
     ]
   })
   ok('a forward reference is refused', plan?.steps[0].dependsOn === null)
-  ok('the forward reference is explained', skipped.some((s) => s.includes('"b"')))
+  ok(
+    'the forward reference is explained',
+    skipped.some((s) => s.includes('"b"'))
+  )
 }
 
 {
@@ -119,7 +131,9 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
 
 {
   const { plan } = V({
-    steps: [{ ref: 'a', agentKind: 'claude', title: 'X', role: 'B', brief: 'go', dependsOn: 'ghost' }]
+    steps: [
+      { ref: 'a', agentKind: 'claude', title: 'X', role: 'B', brief: 'go', dependsOn: 'ghost' }
+    ]
   })
   ok('an unknown dependency becomes a root', plan?.steps[0].dependsOn === null)
 }
@@ -151,7 +165,10 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
     ]
   })
   ok('a join keeps only the first dependency', plan?.steps[2].dependsOn === 'a')
-  ok('dropping the join is explained', skipped.some((s) => /several steps/i.test(s)))
+  ok(
+    'dropping the join is explained',
+    skipped.some((s) => /several steps/i.test(s))
+  )
 }
 
 {
@@ -163,7 +180,10 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
   })
   ok('a duplicate ref is renamed rather than dropped', plan?.steps.length === 2)
   ok('the refs end up distinct', plan?.steps[0].ref !== plan?.steps[1].ref)
-  ok('the rename is explained', skipped.some((s) => /both called themselves/i.test(s)))
+  ok(
+    'the rename is explained',
+    skipped.some((s) => /both called themselves/i.test(s))
+  )
 }
 
 {
@@ -176,7 +196,10 @@ ok('missing steps means no plan', V({ summary: 'hi' }).plan === null)
   }))
   const { plan, skipped } = V({ steps: many })
   ok(`the crew is capped at ${MAX_STEPS}`, plan?.steps.length === MAX_STEPS)
-  ok('the cap is explained', skipped.some((s) => s.includes(String(MAX_STEPS))))
+  ok(
+    'the cap is explained',
+    skipped.some((s) => s.includes(String(MAX_STEPS)))
+  )
 }
 
 {
@@ -216,7 +239,10 @@ ok(
   })
   const edges = missionEdges(plan)
   ok('one edge per dependency', edges.length === 2)
-  ok('fan-out points away from the shared parent', edges.every((e) => e.from === 'a'))
+  ok(
+    'fan-out points away from the shared parent',
+    edges.every((e) => e.from === 'a')
+  )
   ok('the edge is labelled with the role', edges[0].label === 'Review')
   ok('a root contributes no edge', !edges.some((e) => e.to === 'a'))
 }
@@ -228,13 +254,13 @@ ok(
     projectName: 'Brutus-AI',
     rootDir: 'D:/x'
   })
-  ok('the prompt lists only installed agents', p.includes('claude, codex') && !p.includes('gemini,'))
+  ok(
+    'the prompt lists only installed agents',
+    p.includes('claude, codex') && !p.includes('gemini,')
+  )
   ok('the prompt carries the request', p.includes('fix the tests'))
   ok('the prompt names the project', p.includes('Brutus-AI'))
-  ok(
-    'with no project it says so',
-    missionPrompt('x', ['claude']).includes('no folder chosen')
-  )
+  ok('with no project it says so', missionPrompt('x', ['claude']).includes('no folder chosen'))
   ok('the system prompt demands JSON', /JSON only/i.test(MISSION_SYSTEM))
   ok('the system prompt requires a verification step', /verify/i.test(MISSION_SYSTEM))
 }
@@ -248,8 +274,7 @@ function rig(plan, { sessions = null } = {}) {
   let clock = 1_000_000
   const bindings = plan.steps.map((s) => ({ ref: s.ref, nodeId: `node_${s.ref}` }))
   const tracker = new MissionTracker(plan, bindings, {
-    sessionForNode: (nodeId) =>
-      sessions ? (sessions[nodeId] ?? null) : `sess_${nodeId}`,
+    sessionForNode: (nodeId) => (sessions ? (sessions[nodeId] ?? null) : `sess_${nodeId}`),
     deliver: (sessionId, text) => delivered.push({ sessionId, text }),
     record: (level, event, message, fields) => records.push({ level, event, message, fields }),
     now: () => clock
@@ -281,7 +306,10 @@ const chain = V({
 {
   const r = rig(chain)
   ok('the mission starts running', r.tracker.snapshot().status === 'running')
-  ok('the start is recorded', r.records.some((x) => x.event === 'mission.start'))
+  ok(
+    'the start is recorded',
+    r.records.some((x) => x.event === 'mission.start')
+  )
 
   // The session exists the moment the spawn returns, so the root brief goes out
   // straight away. It does not reach the terminal yet: `deliver` is enqueue,
@@ -290,10 +318,17 @@ const chain = V({
   ok('only the root is sent', r.delivered.length === 1)
   ok('a dependent step starts pending', r.tracker.snapshot().steps[1].status === 'pending')
   ok('the brief is what was planned', r.delivered[0].text.startsWith('Write the feature'))
-  ok('the brief is submitted with a carriage return', r.delivered[0].text.endsWith('\r'))
+  ok(
+    'the brief carries no Enter of its own',
+    !r.delivered[0].text.includes('\r'),
+    JSON.stringify(r.delivered[0].text.slice(-12))
+  )
   ok('it went to the root’s own session', r.delivered[0].sessionId === 'sess_node_a')
   ok('the root is now running', r.tracker.snapshot().steps[0].status === 'running')
-  ok('the dispatch is recorded', r.records.some((x) => x.event === 'step.dispatch'))
+  ok(
+    'the dispatch is recorded',
+    r.records.some((x) => x.event === 'step.dispatch')
+  )
 
   // Idle is also the retry path for a step whose session was not up yet, so it
   // must be safe to hit repeatedly on one that already went out.
@@ -319,12 +354,18 @@ const chain = V({
   // The router prompts the dependent; it goes busy.
   r.tracker.noteStatus(r.node('b'), 'busy')
   ok('a handed-off step reads as running', r.tracker.snapshot().steps[1].status === 'running')
-  ok('picking up the handoff is recorded', r.records.some((x) => x.event === 'step.begin'))
+  ok(
+    'picking up the handoff is recorded',
+    r.records.some((x) => x.event === 'step.begin')
+  )
 
   r.tracker.noteTurn(r.node('b'), 'All 42 tests pass')
   const done = r.tracker.snapshot()
   ok('the mission completes when every step is done', done.status === 'done')
-  ok('completion is recorded', r.records.some((x) => x.event === 'mission.done'))
+  ok(
+    'completion is recorded',
+    r.records.some((x) => x.event === 'mission.done')
+  )
   ok('the totals agree', done.totals.done === 2 && done.totals.failed === 0)
   ok('a finish time is set', typeof done.finishedAt === 'number')
 }
@@ -342,8 +383,14 @@ const chain = V({
   ok('everything downstream is blocked', s.steps[1].status === 'blocked')
   ok('the block names the cause', /Apollo/.test(s.steps[1].note ?? ''))
   ok('the mission as a whole failed', s.status === 'failed')
-  ok('the failure is recorded at error level', r.records.some((x) => x.event === 'step.failed' && x.level === 'error'))
-  ok('the block is recorded', r.records.some((x) => x.event === 'step.blocked'))
+  ok(
+    'the failure is recorded at error level',
+    r.records.some((x) => x.event === 'step.failed' && x.level === 'error')
+  )
+  ok(
+    'the block is recorded',
+    r.records.some((x) => x.event === 'step.blocked')
+  )
 }
 
 {
@@ -369,7 +416,10 @@ const chain = V({
   r.tracker.noteStatus(r.node('a'), 'idle')
   r.tracker.noteExit(r.node('a'), 137)
   const s = r.tracker.snapshot()
-  ok('blocking reaches the whole chain', s.steps[1].status === 'blocked' && s.steps[2].status === 'blocked')
+  ok(
+    'blocking reaches the whole chain',
+    s.steps[1].status === 'blocked' && s.steps[2].status === 'blocked'
+  )
   ok('the mission fails once nothing can move', s.status === 'failed')
 }
 
@@ -383,7 +433,10 @@ const chain = V({
   ok('aborting stops the mission', s.status === 'aborted')
   ok('in-flight steps are marked blocked', s.steps[0].status === 'blocked')
   ok('pending steps are marked blocked too', s.steps[1].status === 'blocked')
-  ok('the abort is recorded', r.records.some((x) => x.event === 'mission.aborted'))
+  ok(
+    'the abort is recorded',
+    r.records.some((x) => x.event === 'mission.aborted')
+  )
 
   const before = r.delivered.length
   r.tracker.noteStatus(r.node('b'), 'idle')
@@ -419,7 +472,10 @@ const chain = V({
   const r = rig(nasty)
   r.tracker.noteStatus(r.node('a'), 'idle')
   ok('a brief that cleans to nothing is never sent', r.delivered.length === 0)
-  ok('and the step is failed rather than left hanging', r.tracker.snapshot().steps[0].status === 'failed')
+  ok(
+    'and the step is failed rather than left hanging',
+    r.tracker.snapshot().steps[0].status === 'failed'
+  )
 }
 
 {
@@ -438,9 +494,12 @@ const chain = V({
   const r = rig(nasty)
   r.tracker.noteStatus(r.node('a'), 'idle')
   const sent = r.delivered[0].text
-  // eslint-disable-next-line no-control-regex
-  ok('escape sequences are stripped before the terminal', !/[\u0000-\u001f\u007f]/.test(sent.slice(0, -1)))
-  ok('the carriage return is the only control character', sent.endsWith('\r'))
+
+  ok(
+    'escape sequences are stripped before the terminal',
+    !/[\u0000-\u001f\u007f]/.test(sent.slice(0, -1))
+  )
+  ok('no control character survives at all', !/[\u0000-\u001f\u007f]/.test(sent))
   ok('the real words survive', sent.includes('Fix') && sent.includes('bug'))
 }
 
@@ -494,11 +553,12 @@ const chain = V({
   ok('and the mission status is untouched', r.tracker.snapshot().status === 'running')
 }
 
-
 // ═══ 8. Crew sizing — the system decides, not the user ════════════════════
 
 {
-  const one = V({ steps: [{ ref: 'a', agentKind: 'claude', title: 'A', role: 'Build', brief: 'build it' }] })
+  const one = V({
+    steps: [{ ref: 'a', agentKind: 'claude', title: 'A', role: 'Build', brief: 'build it' }]
+  })
   ok('a one-agent plan is topped up to the floor', one.plan.steps.length === MIN_STEPS)
   ok('the extra agent reviews rather than builds', /review/i.test(one.plan.steps[1].role))
   ok('the reviewer waits for the builder', one.plan.steps[1].dependsOn === 'a')
@@ -509,12 +569,17 @@ const chain = V({
   ok('claude builds, codex checks', one.plan.steps[1].agentKind === 'codex')
   ok('the top-up carries a real brief', one.plan.steps[1].brief.length > 40)
   ok('the brief names the actual request', one.plan.steps[1].brief.includes('do the thing'))
-  ok('the top-up is explained', one.skipped.some((x) => /never one agent/i.test(x)))
+  ok(
+    'the top-up is explained',
+    one.skipped.some((x) => /added to review the work/i.test(x))
+  )
 }
 
 {
   // A codex-only plan must not be reviewed by another codex.
-  const { plan } = V({ steps: [{ ref: 'a', agentKind: 'codex', title: 'A', role: 'Build', brief: 'go' }] })
+  const { plan } = V({
+    steps: [{ ref: 'a', agentKind: 'codex', title: 'A', role: 'Build', brief: 'go' }]
+  })
   ok('a codex builder gets a non-codex reviewer', plan.steps[1].agentKind !== 'codex')
 }
 
@@ -527,7 +592,7 @@ const chain = V({
     ]
   })
   ok('a plan already at the floor is left alone', plan.steps.length === 2)
-  ok('and nothing is reported as added', !skipped.some((x) => /never one agent/i.test(x)))
+  ok('and nothing is reported as added', !skipped.some((x) => /added to review/i.test(x)))
 }
 
 {
@@ -544,7 +609,10 @@ const chain = V({
   const simple = estimateComplexity('make a minimal portfolio site')
   ok('an explicitly small job is simple', simple.tier === 'simple', simple.tier)
   ok('and gets the smallest crew', simple.crew.min === MIN_STEPS && simple.crew.max === 3)
-  ok('the reason is stated', simple.signals.some((x) => /scoped small/.test(x)))
+  ok(
+    'the reason is stated',
+    simple.signals.some((x) => /scoped small/.test(x))
+  )
 
   const standard = estimateComplexity('add login with a database table and an api endpoint')
   ok('several surfaces reads as standard', standard.tier === 'standard', standard.tier)
@@ -556,7 +624,10 @@ const chain = V({
   )
   ok('a sweeping job reads as complex', complex.tier === 'complex', complex.tier)
   ok('and is allowed the full crew', complex.crew.max === MAX_STEPS)
-  ok('heavy verbs are noticed', complex.signals.some((x) => /large-scale/.test(x)))
+  ok(
+    'heavy verbs are noticed',
+    complex.signals.some((x) => /large-scale/.test(x))
+  )
 
   ok('an empty request does not throw', estimateComplexity('').tier === 'simple')
   ok('a null request does not throw', estimateComplexity(null).tier === 'simple')
@@ -572,8 +643,14 @@ const chain = V({
   const p = missionPrompt('rebuild the api', ['claude', 'codex'])
   ok('the prompt states the measured complexity', /COMPLEXITY/.test(p))
   ok('the prompt gives a crew range', /aim for \d+.\d+ agents/.test(p))
-  ok('the system prompt forbids a crew of one', /NEVER fewer than 2/.test(MISSION_SYSTEM))
-  ok('the system prompt names the default pairing', /ONE claude to build and ONE codex/.test(MISSION_SYSTEM))
+  ok(
+    'the system prompt gates a crew of one behind trivial',
+    /SINGLE agent is allowed ONLY/.test(MISSION_SYSTEM)
+  )
+  ok(
+    'the system prompt names the default pairing',
+    /ONE claude to build and ONE codex/.test(MISSION_SYSTEM)
+  )
   ok('the system prompt warns against duplicate work', /duplicating a job/.test(MISSION_SYSTEM))
 }
 
@@ -587,6 +664,67 @@ const chain = V({
   ok('a node of its own is owned', r.tracker.owns(r.node('a')) === true)
   ok('a node from another canvas is not', r.tracker.owns('node_somewhere_else') === false)
   ok('status is readable without a snapshot', r.tracker.status === 'running')
+}
+
+// ═══ 9. Trivial work may run a single agent ═══════════════════════════════
+
+{
+  const t = estimateComplexity('make an index.html file')
+  ok('one static file is trivial', t.tier === 'trivial', t.tier)
+  ok('and may run alone', t.crew.min === TRIVIAL_MIN_STEPS)
+  ok('but is still allowed a pair', t.crew.max === 2)
+  ok(
+    'the reason is stated',
+    t.signals.some((x) => /one file/.test(x))
+  )
+  ok('the floor for trivial is one', floorFor('trivial') === TRIVIAL_MIN_STEPS)
+}
+
+{
+  // The user's own example: a single html file needs one Claude, not a crew.
+  const { plan, skipped } = validateMission(
+    {
+      steps: [{ ref: 'a', agentKind: 'claude', title: 'Apollo', role: 'Build', brief: 'write it' }]
+    },
+    { availableKinds: KINDS, task: 'make an index.html file', workspaceId: 'w' }
+  )
+  ok('a trivial job is left as one agent', plan.steps.length === 1)
+  ok('and nothing is bolted on', !skipped.some((x) => /added to review/i.test(x)))
+  ok('the tier travels with the plan', plan.complexity === 'trivial')
+}
+
+{
+  // A second agent is still honoured when the planner wants one.
+  const { plan } = validateMission(
+    {
+      steps: [
+        { ref: 'a', agentKind: 'claude', title: 'A', role: 'Build', brief: 'write it' },
+        { ref: 'b', agentKind: 'codex', title: 'B', role: 'Check', brief: 'look', dependsOn: 'a' }
+      ]
+    },
+    { availableKinds: KINDS, task: 'make an index.html file', workspaceId: 'w' }
+  )
+  ok('a trivial job may still use two if planned', plan.steps.length === 2)
+}
+
+{
+  // Trivial needs all three signals. One file plus real breadth is not trivial.
+  const wide = estimateComplexity('write an index.html, wire it to the api and add tests')
+  ok('one file plus other surfaces is not trivial', wide.tier !== 'trivial', wide.tier)
+  ok('and is held to the normal floor', floorFor(wide.tier) === MIN_STEPS)
+
+  const heavy = estimateComplexity('refactor index.html across the whole site')
+  ok('a heavy verb defeats trivial', heavy.tier !== 'trivial', heavy.tier)
+
+  const vague = estimateComplexity('build me a startup')
+  ok('a request naming no file is not trivial', vague.tier !== 'trivial', vague.tier)
+  ok('a bare noun with no verb is not trivial', estimateComplexity('index.html').tier !== 'trivial')
+}
+
+{
+  ok('the floor for every other tier is two', floorFor('simple') === MIN_STEPS)
+  ok('standard too', floorFor('standard') === MIN_STEPS)
+  ok('complex too', floorFor('complex') === MIN_STEPS)
 }
 
 // ═══ Report ═══════════════════════════════════════════════════════════════

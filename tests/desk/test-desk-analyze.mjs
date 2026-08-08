@@ -87,7 +87,9 @@ for (const [label, input] of [
 // ═══ 3. Triage parsing ════════════════════════════════════════════════════
 
 {
-  const t = parseTriage('{"category":"needs-reply","priority":1,"reason":"Asked for a quote","confidence":0.9}')
+  const t = parseTriage(
+    '{"category":"needs-reply","priority":1,"reason":"Asked for a quote","confidence":0.9}'
+  )
   ok('reads the category', t.category === 'needs-reply')
   ok('reads the priority', t.priority === 1)
   ok('reads the reason', t.reason === 'Asked for a quote')
@@ -134,7 +136,10 @@ ok('the unknown fallback is itself zero-confidence', UNKNOWN_TRIAGE.confidence =
   ok('reads owedBy them', list[1].owedBy === 'them')
   ok('parses a due date', list[0].dueAt === Date.parse('2026-08-10'))
   ok('accepts a null due date', list[1].dueAt === null)
-  ok('carries the thread context', list[0].threadId === 't1' && list[0].contact === 'ravi@client.com')
+  ok(
+    'carries the thread context',
+    list[0].threadId === 't1' && list[0].contact === 'ravi@client.com'
+  )
   ok('gives every entry a distinct id', list[0].id !== list[1].id)
 }
 
@@ -177,7 +182,10 @@ for (const [label, raw] of [
     { from: 'b@x.com', date: 2000, body: 'Second message', subject: 'S' }
   ]
   const prompt = threadToPrompt(messages)
-  ok('includes every message', prompt.includes('First message') && prompt.includes('Second message'))
+  ok(
+    'includes every message',
+    prompt.includes('First message') && prompt.includes('Second message')
+  )
   ok('preserves order', prompt.indexOf('First') < prompt.indexOf('Second'))
   ok('labels the sender', prompt.includes('From: a@x.com'))
 }
@@ -196,7 +204,10 @@ ok('an empty thread renders to an empty string', threadToPrompt([]) === '')
 
 {
   ok('strips a code fence', !cleanDraft('```\nhello\n```').includes('```'))
-  ok('strips a subject line', !cleanDraft('Subject: Re: x\n\nHello there').toLowerCase().includes('subject:'))
+  ok(
+    'strips a subject line',
+    !cleanDraft('Subject: Re: x\n\nHello there').toLowerCase().includes('subject:')
+  )
   ok('keeps a greeting', cleanDraft('Hi Ravi,\n\nAll set.').includes('Hi Ravi'))
   ok('trims surrounding whitespace', cleanDraft('   hello   ') === 'hello')
   ok('handles empty input', cleanDraft('') === '')
@@ -217,7 +228,10 @@ ok('an empty thread renders to an empty string', threadToPrompt([]) === '')
   ok('a model failure still returns a usable result', t.category === 'needs-reply')
 
   const c = await extractCommitments([{ from: 'a', date: 1, body: 'x', subject: 's' }], boom)
-  ok('a model failure yields no commitments rather than throwing', Array.isArray(c) && c.length === 0)
+  ok(
+    'a model failure yields no commitments rather than throwing',
+    Array.isArray(c) && c.length === 0
+  )
 }
 
 {

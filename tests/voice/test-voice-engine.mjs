@@ -183,7 +183,10 @@ ok('cloud does not use the edge ASR path', speechChannel('cloud') === 'brain-asr
       'the deadline is cleared once connected',
       /isReconnecting = false[\s\S]{0,120}clearConnectDeadline\(\)/.test(voice)
     )
-    ok('the deadline is cleared on user disconnect', /disconnect\(\): void \{[\s\S]{0,300}clearConnectDeadline\(\)/.test(voice))
+    ok(
+      'the deadline is cleared on user disconnect',
+      /disconnect\(\): void \{[\s\S]{0,300}clearConnectDeadline\(\)/.test(voice)
+    )
   }
 
   // ── Power button switching itself off ──

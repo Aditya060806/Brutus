@@ -623,8 +623,8 @@ export class StudioRouter {
      *
      * Sanitised here rather than only where the instruction is built, so the
      * guarantee holds no matter which path produced it — model, fallback, or
-     * anything added later. The `\r` appended below is the one control
-     * character that ever reaches the terminal, and it is ours.
+     * anything added later. `deliver` presses Enter afterwards, as a separate
+     * keystroke — see `PtyManager.submit` for why that has to be separate.
      */
     const safe = sanitizeForTerminal(instruction)
     if (!safe) {
@@ -634,7 +634,7 @@ export class StudioRouter {
       return
     }
 
-    this.deps.deliver(targetSession, `${safe}\r`)
+    this.deps.deliver(targetSession, safe)
     this.deps.emit({
       type: 'routed',
       edgeId: edge.id,
