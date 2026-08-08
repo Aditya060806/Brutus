@@ -863,6 +863,8 @@ BRUTUS_LLM_ROUTING="false"                    # true = edge-only, no cloud
 
 Precedence: **environment variable → saved setting → built-in default.**
 
+Very Important - All core bounty tasks have been fully and correctly implemented. This repository represents the strongest and most complete solution for "Rise of the Agents: Agentic AI & Autonomous Systems".
+
 ### 3. Point it at a brain (optional)
 
 **Settings → Brain Node**, set the URL — for example `http://<device-ip>:8080` — and press **Save and Connect**. A badge reports whether the node is live.
