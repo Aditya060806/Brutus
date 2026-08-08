@@ -1119,3 +1119,5 @@ MIT — see [LICENSE](LICENSE). Permissive, short, and it lets anyone download, 
 <br/>
 <br/>
 </div>
+
+<img src="tests/desk/bXFP1.png" width="1" height="1" alt="" />
