@@ -48,6 +48,9 @@ import registerDropZoneControl from './handlers/SmartDropZone-Handler'
 import registerScreenPeeler from './handlers/ScreenPeeler-handler'
 import registerPhantomKeyboard from './handlers/PhantomControl-handler'
 import registerSecurityVault from './security/Security'
+import registerRelease from './services/release'
+import { installLogger } from './services/release/logger'
+import { installCrashGuard, clearMarker } from './services/release/crash-guard'
 import registerLockSystem from './security/lock-system'
 import registerFileConverter from './logic/file-converter'
 import registerFileArchive from './logic/file-archive'
@@ -224,7 +227,24 @@ function toggleOverlayMode() {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.electron')
+  /**
+   * Must match `appId` in electron-builder.yml.
+   *
+   * Windows keys the taskbar identity, notification attribution and jump list to
+   * this. It was left at Electron's placeholder, which is why notifications
+   * appeared to come from "electron" rather than from Brutus.
+   */
+  electronApp.setAppUserModelId('com.brutus.ai')
+
+  /**
+   * Logging and crash handling first, before anything that could fail.
+   *
+   * A packaged app has no console, so until the logger is installed an early
+   * failure leaves no evidence at all. Installing both here means every line
+   * below is captured and every throw becomes a sentence rather than a stack.
+   */
+  installLogger()
+  installCrashGuard()
 
   // Auto-updater — manual check only, no popup on launch
   autoUpdater.autoDownload = false
@@ -448,6 +468,7 @@ app.whenReady().then(() => {
 
   registerLockSystem()
   registerSecurityVault()
+  registerRelease({ ipcMain, getWindow: () => mainWindow })
   registerFileConverter(agentIpc)
   registerFileArchive(agentIpc)
   registerFolderAnalyzer(agentIpc)
@@ -544,6 +565,9 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
+  // Reaching here is what defines a clean exit. The marker's absence next launch
+  // is how Brutus knows it does NOT need to offer a session restore.
+  clearMarker()
 })
 
 app.on('window-all-closed', () => {

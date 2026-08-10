@@ -1,18 +1,100 @@
-appId: com.electron.app
-productName: brutus-ai
+# ──────────────────────────────────────────────────────────────────────────────
+#  BRUTUS — Windows release packaging
+# ──────────────────────────────────────────────────────────────────────────────
+#  The goal this file serves: download, install, launch, paste a key, start
+#  working. No terminal, no runtime to install by hand, no config file to edit.
+#
+#  ⚠️  `appId` and `productName` are IDENTITY. Windows derives the install path,
+#  the uninstall entry, the auto-update channel and — through Electron —
+#  `app.getPath('userData')` from them. Changing either after a public release
+#  orphans every existing user's settings, keys and workspaces. They are now
+#  correct; treat them as frozen.
+# ──────────────────────────────────────────────────────────────────────────────
+
+appId: com.brutus.ai
+productName: Brutus
+copyright: Copyright © 2026 Aditya Pandey
+
 protocols:
   - name: brutus-oauth
     schemes:
       - brutus
+
 directories:
   buildResources: build
+
+# ── What ships inside app.asar ──────────────────────────────────────────────
+# Default behaviour is "almost everything in the project", which quietly shipped
+# the test bundles (81 MB), the README screenshots (25 MB) and a Downloads folder
+# (10 MB) to every user. Only the built output and runtime dependencies belong
+# here; each exclusion below was checked against the source for runtime reads
+# first.
 files:
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md,README.txt}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,credentials.json}'
+  # Development and repository material. Nothing under src/ reads from these.
+  - '!tests/**'
+  - '!scripts/**'
+  - '!assets/**'
+  - '!Downloads/**'
+  - '!arduino/**'
+  - '!ml/**'
+  - '!build/**'
+  - '!dist/**'
+  - '!docs/**'
+  - '!.github/**'
+  - '!.claude/**'
+  - '!.kiro/**'
+  - '!.sixth/**'
+  - '!{npm-errors.txt,build-log.txt,BRUTUS_CODEBASE_SUMMARY.md,fine-tuned models.md}'
+  - '!{banner.png,eng.traineddata}'
+
+  # ── Renderer-only libraries ─────────────────────────────────────────────
+  # Vite bundles the entire renderer into `out/renderer`, so renderer code can
+  # never `require` from node_modules at runtime — which is what makes dropping
+  # these provably safe rather than a gamble.
+  #
+  # The list was derived, not guessed: every literal require/import in the built
+  # `out/main` and `out/preload` bundles was extracted, and nothing below appears
+  # in it. Re-derive after adding a main-process dependency:
+  #
+  #   Get-ChildItem out\main,out\preload -Recurse -Filter *.js |
+  #     Select-String -Pattern "require\(`"([^`"./][^`"]*)`""
+  #
+  # ~160 MB, most of it react-icons and three.
+  - '!**/node_modules/react-icons/**'
+  - '!**/node_modules/three/**'
+  - '!**/node_modules/@react-three/**'
+  - '!**/node_modules/lucide-react/**'
+  - '!**/node_modules/recharts/**'
+  - '!**/node_modules/{gsap,@gsap}/**'
+  - '!**/node_modules/{leaflet,react-leaflet}/**'
+  - '!**/node_modules/{reactflow,@reactflow}/**'
+  - '!**/node_modules/framer-motion/**'
+  - '!**/node_modules/face-api.js/**'
+  - '!**/node_modules/{xterm,xterm-addon-fit}/**'
+  - '!**/node_modules/{monaco-editor,@monaco-editor}/**'
+  - '!**/node_modules/tesseract.js/**'
+  - '!**/node_modules/@huggingface/**'
+  - '!**/node_modules/qrcode.react/**'
+  - '!**/node_modules/{react-markdown,remark-gfm,react-tooltip}/**'
+
+  # ── Other-platform native binaries ──────────────────────────────────────
+  # onnxruntime-node ships prebuilds for every OS and architecture (92 MB). This
+  # build targets win32-x64 only, so the other 83 MB is dead weight that would be
+  # downloaded by every user and never loaded.
+  #
+  # NOTE: keep this in step with the `arch` list under `win.target`. Adding an
+  # ARM64 target without removing the arm64 exclusion produces a build that
+  # cannot load its own speech model.
+  - '!**/node_modules/onnxruntime-node/bin/napi-v3/darwin/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v3/linux/**'
+  - '!**/node_modules/onnxruntime-node/bin/napi-v3/win32/arm64/**'
+
 asarUnpack:
   - resources/**
   # ── Native binaries ──
@@ -24,41 +106,99 @@ asarUnpack:
   # under @xenova/transformers, and it is the nested copy Transformers.js loads.
   - '**/node_modules/onnxruntime-node/bin/**'
   - '**/node_modules/sharp/**'
+  # Studio runs real coding-agent CLIs in real pseudo-terminals. node-pty is a
+  # native addon for the same reason as the above: it must be a file on disk.
+  - '**/node_modules/node-pty/**'
 
-# ── Bundled models ──
-# Shipped beside the app (NOT inside the ASAR) and read at runtime through
-# `bundledModelsDir()` in src/main/services/voice/model-store.ts.
-#
-# The speech models live here rather than being downloaded on first use so that
-# on-device voice — a privacy feature — never requires a network round-trip
-# before it can be used offline. The optional language model is deliberately NOT
-# here: it is ~1 GB and downloads on demand into userData.
+# ── Shipped beside the app, not inside the ASAR ─────────────────────────────
 extraResources:
+  # Speech models, read at runtime through `bundledModelsDir()` in
+  # src/main/services/voice/model-store.ts.
+  #
+  # These ship rather than downloading on first use so that on-device voice — a
+  # privacy feature — never needs a network round-trip before it can work
+  # offline. The optional ~1 GB language model is deliberately NOT here; it
+  # downloads on demand into userData.
   - from: resources/models
     to: models
     filter:
       - '**/*'
+  # User-facing documentation, so Help → Documentation works with no internet.
+  - from: docs
+    to: docs
+    filter:
+      - '**/*.md'
 
 win:
-  executableName: brutus-ai
-  icon: build/icon.ico 
+  executableName: Brutus
+  icon: build/icon.ico
+  # ── Publisher identity ──
+  # `publisherName` lives under `signtoolOptions` in electron-builder 26.x, not
+  # directly on `win` — putting it on `win` fails schema validation outright.
+  #
+  # Until the binary is actually signed, Windows still says "Unknown publisher":
+  # this name is what a signature would be checked against, not a substitute for
+  # one. See docs/RELEASING.md for the signing step, which is the only thing that
+  # clears SmartScreen.
+  signtoolOptions:
+    publisherName: Aditya Pandey
+    signingHashAlgorithms:
+      - sha256
+    rfc3161TimeStampServer: http://timestamp.digicert.com
+  # x64 only, and stated rather than implied. ARM64 Windows runs this through
+  # emulation; a native ARM64 target needs its own tested build of every native
+  # addon (node-pty, sharp, onnxruntime) and is not claimed here.
   target:
     - target: nsis
-    - target: msi
+      arch:
+        - x64
+    # Item 10: runs from a USB stick with no installation at all.
+    - target: portable
+      arch:
+        - x64
+
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
+  artifactName: Brutus-Setup-${version}.${ext}
+  shortcutName: Brutus
+  uninstallDisplayName: Brutus ${version}
 
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
   installerHeaderIcon: build/icon.ico
+  # Regenerate with scripts/make-installer-art.ps1 — NSIS does not scale these
+  # and silently misrenders anything that is not exactly 164x314 / 150x57.
+  installerSidebar: build/installerSidebar.bmp
+  uninstallerSidebar: build/uninstallerSidebar.bmp
 
+  # A real wizard rather than a silent one-click drop, because the user chooses
+  # the install location and expects to see what is happening.
   oneClick: false
   allowToChangeInstallationDirectory: true
+
+  # Per-user by default: no UAC prompt, no admin account needed, which removes
+  # the single most common reason an install fails on a locked-down machine.
+  # `allowElevation` still lets someone choose all-users if they want it.
+  perMachine: false
+  allowElevation: true
+
   createDesktopShortcut: always
   createStartMenuShortcut: true
   runAfterFinish: true
+
+  # Uninstalling removes the application. It does NOT remove settings, keys,
+  # workspaces or task records — deleting a user's data because they reinstalled
+  # is not a decision an uninstaller should make silently. The uninstaller
+  # offers it as a checkbox instead (see build/installer.nsh).
+  deleteAppDataOnUninstall: false
+  include: build/installer.nsh
+
+portable:
+  artifactName: Brutus-Portable-${version}.${ext}
+  # Portable mode keeps its data beside the executable rather than in AppData,
+  # so a USB stick carries the whole thing. `unpackDirName: false` reuses one
+  # temp directory instead of a fresh one per launch, which is what makes
+  # settings persist between runs.
+  unpackDirName: false
 
 mac:
   entitlementsInherit: build/entitlements.mac.plist
@@ -74,7 +214,6 @@ dmg:
 linux:
   target:
     - AppImage
-    - snap
     - deb
   maintainer: Aditya Pandey
   category: Utility

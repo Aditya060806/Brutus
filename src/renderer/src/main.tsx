@@ -106,12 +106,39 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   // Subscribed rather than read once: finishing the welcome flow flips this,
   // and the guard has to re-run so it stops redirecting back to /welcome.
   const onboarded = useProfileStore((state) => state.onboarded)
+  // Set when the user chose to run without a cloud account.
+  const localOnly = useAuthStore((state) => state.localOnly)
 
   useEffect(() => {
     if (!isAuthInitialized) return
 
+    /** Lock, then first-run, then in. Shared by the cloud and local paths. */
+    const proceed = (): void => {
+      if (!isSessionUnlocked && location.pathname !== '/lock') {
+        navigate('/lock', { replace: true })
+        return
+      }
+      if (isSessionUnlocked && !onboarded && location.pathname !== '/welcome') {
+        navigate('/welcome', { replace: true })
+        return
+      }
+      setStatus('authorized')
+    }
+
     const verifyAccess = async () => {
       setStatus('checking')
+
+      /**
+       * Local-only: no cloud call at all.
+       *
+       * Nothing Brutus does needs the account, so a user who chose to skip
+       * sign-in goes straight to the lock screen. This is checked before the
+       * token so that choosing local-only cannot be undone by a stale token.
+       */
+      if (localOnly) {
+        proceed()
+        return
+      }
 
       try {
         if (!accessToken && !localStorage.getItem('brutus_cloud_token')) {
@@ -136,29 +163,38 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
           })
         }
 
-        if (!isSessionUnlocked && location.pathname !== '/lock') {
-          navigate('/lock', { replace: true })
-          return
-        }
-
-        // First run: send the user through the customise flow once, after the
-        // vault is unlocked so it is never the first thing a stranger sees.
-        // The pathname guard is what stops this redirecting in a loop once we
-        // are already there.
-        if (isSessionUnlocked && !onboarded && location.pathname !== '/welcome') {
-          navigate('/welcome', { replace: true })
-          return
-        }
-
-        setStatus('authorized')
+        // Lock, then first-run, then in. See `proceed` above.
+        proceed()
       } catch (error) {
-        logout()
-        navigate('/login', { replace: true })
+        /**
+         * A rejected token and an unreachable backend are not the same thing.
+         *
+         * This used to call `logout()` on any failure, which meant losing your
+         * network — or the backend being down, or the machine being behind a
+         * firewall — signed you out and stranded you on the login screen with a
+         * token that was perfectly valid. On a packaged build that is a brick,
+         * not a degraded state.
+         *
+         * So only an explicit 401/403 clears the session. Anything else keeps
+         * the token and lets the user in, because every feature that matters is
+         * local anyway.
+         */
+        const status = (error as { response?: { status?: number } })?.response?.status
+        const rejected = status === 401 || status === 403
+
+        if (rejected) {
+          logout()
+          navigate('/login', { replace: true })
+          return
+        }
+
+        console.warn('[auth] cloud check failed, continuing offline:', error)
+        proceed()
       }
     }
 
     verifyAccess()
-  }, [isAuthInitialized, navigate, location.pathname, accessToken, logout, onboarded])
+  }, [isAuthInitialized, navigate, location.pathname, accessToken, logout, onboarded, localOnly])
 
   if (!isAuthInitialized || status === 'checking') {
     return <CheckingSecurityUI />

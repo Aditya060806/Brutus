@@ -11,6 +11,8 @@ import {
   type VoiceProfile
 } from '@renderer/store/profile-store'
 import { ACCENT_PRESETS } from '@renderer/services/theme'
+import ProviderSetup from '@renderer/components/setup/ProviderSetup'
+import { completeSetup } from '@renderer/services/release-client'
 
 /**
  * The first-run customise flow.
@@ -28,7 +30,15 @@ import { ACCENT_PRESETS } from '@renderer/services/theme'
  *
  * Re-runnable from Settings → Account → Reset setup.
  */
-const STEPS = ['You', 'Look', 'Voice'] as const
+/**
+ * `Brain` is third rather than first on purpose.
+ *
+ * Asking for an API key as the very first thing a stranger sees reads like a
+ * paywall. Two cheap, satisfying choices come first, so by the time the key is
+ * requested the user has already invested a little and can see what they are
+ * configuring — and it is still early enough that nothing has failed yet.
+ */
+const STEPS = ['You', 'Look', 'Brain', 'Voice'] as const
 
 const Welcome = (): React.JSX.Element => {
   const navigate = useNavigate()
@@ -59,9 +69,18 @@ const Welcome = (): React.JSX.Element => {
   const suggested = !hasChosenName && cloudUser?.name ? cloudUser.name : displayName
   const name = draft ?? suggested
 
+  /** Set once a provider verifies, so the footer can stop nagging about it. */
+  const [providerReady, setProviderReady] = useState(false)
+  /** True when the user chose to look around without configuring anything. */
+  const [demoMode, setDemoMode] = useState(false)
+
   const finish = (): void => {
     if (name.trim()) setDisplayName(name.trim())
     setOnboarded(true)
+    // Tell main the wizard is genuinely done, so it is not offered again, and
+    // record whether the user is in demo mode — which is what lets the rest of
+    // the app explain why a cloud feature is unavailable rather than just fail.
+    void completeSetup(demoMode && !providerReady)
     navigate('/', { replace: true })
   }
 
@@ -83,23 +102,25 @@ const Welcome = (): React.JSX.Element => {
             <RiShieldFlashLine size={24} />
           </span>
           <h1 className="text-2xl font-semibold tracking-tight">
-            {step === 0
-              ? 'Welcome to Brutus'
-              : STEPS[step] === 'Look'
-                ? 'Make it yours'
-                : 'Give it a voice'}
+            {STEPS[step] === 'You' && 'Welcome to Brutus'}
+            {STEPS[step] === 'Look' && 'Make it yours'}
+            {STEPS[step] === 'Brain' && 'Connect a brain'}
+            {STEPS[step] === 'Voice' && 'Give it a voice'}
           </h1>
           <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-content-muted">
-            {step === 0 &&
-              'A couple of quick choices, then you are in. You can change all of it later in Settings.'}
-            {step === 1 &&
+            {STEPS[step] === 'You' &&
+              'A few quick choices, then you are in. You can change all of it later in Settings.'}
+            {STEPS[step] === 'Look' &&
               'Pick an accent. Everything in the app follows it — buttons, highlights, the canvas glow.'}
-            {step === 2 && 'Choose the voice Brutus speaks with when the link is live.'}
+            {STEPS[step] === 'Brain' &&
+              'One provider is all Brutus needs to start. This is the only step that matters.'}
+            {STEPS[step] === 'Voice' &&
+              'Choose the voice Brutus speaks with when the link is live.'}
           </p>
         </div>
 
         <Card tone="elevated" className="p-6">
-          {step === 0 && (
+          {STEPS[step] === 'You' && (
             <div className="flex flex-col gap-5">
               <div className="flex items-center gap-4">
                 <span
@@ -141,7 +162,7 @@ const Welcome = (): React.JSX.Element => {
             </div>
           )}
 
-          {step === 1 && (
+          {STEPS[step] === 'Look' && (
             <div className="flex flex-col gap-5">
               <div>
                 <p className="mb-2.5 text-[13px] font-medium text-content">Accent</p>
@@ -204,7 +225,21 @@ const Welcome = (): React.JSX.Element => {
             </div>
           )}
 
-          {step === 2 && (
+          {STEPS[step] === 'Brain' && (
+            <ProviderSetup
+              onReady={() => {
+                setProviderReady(true)
+                setDemoMode(false)
+                setStep(step + 1)
+              }}
+              onSkip={() => {
+                setDemoMode(true)
+                setStep(step + 1)
+              }}
+            />
+          )}
+
+          {STEPS[step] === 'Voice' && (
             <div className="flex flex-col gap-3">
               {(
                 [
@@ -239,8 +274,9 @@ const Welcome = (): React.JSX.Element => {
                 )
               })}
               <p className="mt-1 text-xs leading-relaxed text-content-faint">
-                The voice link needs a Gemini API key. You can add one any time in Settings → API
-                Keys.
+                {providerReady
+                  ? 'Your provider is connected, so the voice link is ready to use.'
+                  : 'Live voice needs a connected provider. You can add one any time in Settings → API Keys.'}
               </p>
             </div>
           )}
@@ -265,14 +301,18 @@ const Welcome = (): React.JSX.Element => {
                 />
               ))}
             </div>
-            <Button
-              size="sm"
-              disabled={step === 0 && !name.trim()}
-              onClick={next}
-              trailingIcon={<RiArrowRightLine size={14} />}
-            >
-              {step === STEPS.length - 1 ? 'Start' : 'Next'}
-            </Button>
+            {/* The Brain step owns its own advance, because "Next" past an
+                untested key would defeat the point of testing it. */}
+            {STEPS[step] !== 'Brain' && (
+              <Button
+                size="sm"
+                disabled={STEPS[step] === 'You' && !name.trim()}
+                onClick={next}
+                trailingIcon={<RiArrowRightLine size={14} />}
+              >
+                {step === STEPS.length - 1 ? 'Start' : 'Next'}
+              </Button>
+            )}
           </div>
         </div>
       </div>

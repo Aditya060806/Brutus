@@ -10,6 +10,7 @@ import AppearancePanel from './AppearancePanel'
 import BrainNodePanel from './BrainNodePanel'
 import DeskPanel from './DeskPanel'
 import DevToolsPanel from './DevToolsPanel'
+import DiagnosticsPanel from './DiagnosticsPanel'
 import HistoryPanel from './HistoryPanel'
 import PersonalityPanel from './PersonalityPanel'
 import PhoneBridgePanel from './PhoneBridgePanel'
@@ -41,6 +42,7 @@ export const SETTINGS_PANELS: Record<SettingsEntryId, ComponentType<PanelProps>>
   brain: BrainNodePanel,
   history: HistoryPanel,
   bridge: PhoneBridgePanel,
+  diagnostics: DiagnosticsPanel,
   devtools: DevToolsPanel,
   security: SecurityPanel
 }

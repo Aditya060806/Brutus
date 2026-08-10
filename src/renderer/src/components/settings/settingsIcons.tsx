@@ -12,6 +12,7 @@ import {
   RiPaletteLine,
   RiPhoneLine,
   RiShieldKeyholeLine,
+  RiPulseLine,
   RiSparkling2Line,
   RiTeamLine,
   RiUserLine
@@ -40,7 +41,8 @@ const ICONS: Record<string, ReactNode> = {
   chat: <RiChat3Line size={15} />,
   phone: <RiPhoneLine size={15} />,
   code: <RiCodeBoxLine size={15} />,
-  shield: <RiShieldKeyholeLine size={15} />
+  shield: <RiShieldKeyholeLine size={15} />,
+  activity: <RiPulseLine size={15} />
 }
 
 export function settingsIcon(key: string): ReactNode {
